@@ -67,6 +67,16 @@ interface GoalResponse {
   } | null;
 }
 
+const THREAD_PERMISSION_OVERRIDES = {
+  approvalPolicy: 'never',
+  sandbox: 'danger-full-access',
+} as const;
+
+const TURN_PERMISSION_OVERRIDES = {
+  approvalPolicy: 'never',
+  sandboxPolicy: { type: 'dangerFullAccess' },
+} as const;
+
 const SOCKET_BASENAME = 'codex.sock';
 const SOCKET_PATH_WARN_BYTES = 100;
 const BOOTSTRAP_PATTERN = '[codex-app-server] ready';
@@ -325,6 +335,7 @@ export class CodexAppServerPTY {
           const resumed = await this.request<ThreadResponse>('thread/resume', {
             threadId: persisted.threadId,
             cwd: this._cwd,
+            ...THREAD_PERMISSION_OVERRIDES,
             config: { features: { goals: true } },
             excludeTurns: true,
             persistExtendedHistory: true,
@@ -341,6 +352,7 @@ export class CodexAppServerPTY {
         const resumed = await this.request<ThreadResponse>('thread/resume', {
           threadId: latest,
           cwd: this._cwd,
+          ...THREAD_PERMISSION_OVERRIDES,
           config: { features: { goals: true } },
           excludeTurns: true,
           persistExtendedHistory: true,
@@ -352,6 +364,7 @@ export class CodexAppServerPTY {
 
     const started = await this.request<ThreadResponse>('thread/start', {
       cwd: this._cwd,
+      ...THREAD_PERMISSION_OVERRIDES,
       config: { features: { goals: true } },
       sessionStartSource: 'startup',
       experimentalRawEvents: false,
@@ -395,7 +408,7 @@ export class CodexAppServerPTY {
   private async startTurn(input: unknown[]): Promise<void> {
     if (!this._threadId) throw new Error('No Codex app-server thread is active');
     const completion = this.createTurnCompletion();
-    await this.request('turn/start', { threadId: this._threadId, input });
+    await this.request('turn/start', { threadId: this._threadId, input, ...TURN_PERMISSION_OVERRIDES });
     await completion;
   }
 

@@ -175,6 +175,8 @@ describe('CodexAppServerPTY command mapping', () => {
         { type: 'skill', name: 'imagegen', path: '/skill.md' },
         { type: 'text', text: 'make a logo', text_elements: [] },
       ],
+      approvalPolicy: 'never',
+      sandboxPolicy: { type: 'dangerFullAccess' },
     });
 
     (pty as unknown as { handleRpcMessage(message: unknown): void }).handleRpcMessage({
@@ -196,6 +198,8 @@ describe('CodexAppServerPTY command mapping', () => {
     expect(requestMock).toHaveBeenLastCalledWith('turn/start', {
       threadId: 'thread-1',
       input: [{ type: 'text', text: 'first', text_elements: [] }],
+      approvalPolicy: 'never',
+      sandboxPolicy: { type: 'dangerFullAccess' },
     });
 
     pty.write('second');
@@ -211,6 +215,8 @@ describe('CodexAppServerPTY command mapping', () => {
     expect(requestMock).toHaveBeenLastCalledWith('turn/start', {
       threadId: 'thread-1',
       input: [{ type: 'text', text: 'second', text_elements: [] }],
+      approvalPolicy: 'never',
+      sandboxPolicy: { type: 'dangerFullAccess' },
     });
 
     internals.handleRpcMessage({ method: 'turn/completed', params: {} });
@@ -227,6 +233,8 @@ describe('CodexAppServerPTY thread lifecycle', () => {
 
     expect(requestMock).toHaveBeenCalledWith('thread/start', {
       cwd: '/tmp/fw/orgs/acme/agents/codex-app-agent',
+      approvalPolicy: 'never',
+      sandbox: 'danger-full-access',
       config: { features: { goals: true } },
       sessionStartSource: 'startup',
       experimentalRawEvents: false,
@@ -255,6 +263,8 @@ describe('CodexAppServerPTY thread lifecycle', () => {
     expect(requestMock).toHaveBeenCalledWith('thread/resume', {
       threadId: 'persisted-thread',
       cwd: '/tmp/fw/orgs/acme/agents/codex-app-agent',
+      approvalPolicy: 'never',
+      sandbox: 'danger-full-access',
       config: { features: { goals: true } },
       excludeTurns: true,
       persistExtendedHistory: true,
