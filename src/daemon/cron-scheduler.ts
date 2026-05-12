@@ -515,7 +515,7 @@ export class CronScheduler {
         try {
           const ctxRoot = process.env.CTX_ROOT || join(homedir(), '.cortextos', process.env.CTX_INSTANCE_ID || 'default');
           const stateDir = join(ctxRoot, 'state', this.agentName);
-          updateCronFire(stateDir, name, cron.interval);
+          updateCronFire(stateDir, name, cron.schedule);
         } catch {
           // Non-fatal — gap-detector nudge is noise, not a correctness issue.
         }
