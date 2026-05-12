@@ -1,13 +1,9 @@
-// cortextOS Dashboard - JSON/JSONL to SQLite sync engine
-// Bridges agent-written files on disk with the SQLite read cache.
-
 import fs from 'fs';
 import path from 'path';
-import { db } from './db';
+import { supabase } from './supabase';
 import {
   CTX_ROOT,
   getOrgs,
-  getAgentsForOrg,
   getTaskDir,
   getApprovalDir,
   getEventsDir,
@@ -15,249 +11,190 @@ import {
 } from './config';
 
 // ---------------------------------------------------------------------------
-// Mtime tracking helpers
-// ---------------------------------------------------------------------------
-
-function hasFileChanged(filePath: string): boolean {
-  try {
-    const stat = fs.statSync(filePath);
-    const row = db
-      .prepare('SELECT mtime FROM sync_meta WHERE file_path = ?')
-      .get(filePath) as { mtime: number } | undefined;
-    return !row || row.mtime < stat.mtimeMs;
-  } catch {
-    return false; // file doesn't exist
-  }
-}
-
-function markSynced(filePath: string): void {
-  const stat = fs.statSync(filePath);
-  db.prepare(
-    `INSERT OR REPLACE INTO sync_meta (file_path, mtime, last_synced)
-     VALUES (?, ?, datetime('now'))`,
-  ).run(filePath, stat.mtimeMs);
-}
-
-// ---------------------------------------------------------------------------
 // Task sync
 // ---------------------------------------------------------------------------
 
-export function syncTasks(org: string): number {
+export async function syncTasks(org: string): Promise<number> {
   const taskDir = getTaskDir(org);
-  console.log(`[sync] syncTasks org=${org} dir=${taskDir} exists=${fs.existsSync(taskDir)}`);
   if (!fs.existsSync(taskDir)) return 0;
 
-  let synced = 0;
-
-  const upsert = db.prepare(`
-    INSERT OR REPLACE INTO tasks
-      (id, title, description, status, priority, assignee, org, project, needs_approval, created_at, updated_at, completed_at, notes, source_file)
-    VALUES
-      (@id, @title, @description, @status, @priority, @assignee, @org, @project, @needs_approval, @created_at, @updated_at, @completed_at, @notes, @source_file)
-  `);
-
   const files = fs.readdirSync(taskDir).filter((f) => f.endsWith('.json'));
-  console.log(`[sync] Found ${files.length} task files in ${taskDir}`);
+  const rows: Record<string, unknown>[] = [];
 
-  const run = db.transaction(() => {
-    const activePaths: string[] = [];
-
-    for (const file of files) {
-      const filePath = path.join(taskDir, file);
-      activePaths.push(filePath);
-      if (!hasFileChanged(filePath)) continue;
-
-      try {
-        const raw = fs.readFileSync(filePath, 'utf-8');
-        const task = JSON.parse(raw);
-        upsert.run({
-          id: task.id ?? path.basename(file, '.json'),
-          title: task.title ?? 'Untitled',
-          description: task.description ?? null,
-          status: task.status ?? 'pending',
-          priority: task.priority ?? 'normal',
-          assignee: task.assigned_to ?? task.assignee ?? null,
-          org,
-          project: task.project ?? null,
-          needs_approval: task.needs_approval ? 1 : 0,
-          created_at: task.created_at ?? new Date().toISOString(),
-          updated_at: task.updated_at ?? null,
-          completed_at: task.completed_at ?? null,
-          notes: task.notes ?? null,
-          source_file: filePath,
-        });
-        markSynced(filePath);
-        synced++;
-      } catch (err) {
-        console.error(`[sync] Failed to sync task ${file}:`, err);
-      }
+  for (const file of files) {
+    const filePath = path.join(taskDir, file);
+    try {
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      const task = JSON.parse(raw);
+      rows.push({
+        id: task.id ?? path.basename(file, '.json'),
+        title: task.title ?? 'Untitled',
+        description: task.description ?? null,
+        status: task.status ?? 'pending',
+        priority: task.priority ?? 'normal',
+        assignee: task.assigned_to ?? task.assignee ?? null,
+        org,
+        project: task.project ?? null,
+        needs_approval: task.needs_approval ?? false,
+        created_at: task.created_at ?? new Date().toISOString(),
+        updated_at: task.updated_at ?? null,
+        completed_at: task.completed_at ?? null,
+        notes: task.notes ?? null,
+        source_file: filePath,
+      });
+    } catch (err) {
+      console.error(`[sync] Failed to parse task ${file}:`, err);
     }
+  }
 
-    // Prune rows whose source files no longer exist on disk
-    if (activePaths.length > 0) {
-      const placeholders = activePaths.map(() => '?').join(',');
-      db.prepare(
-        `DELETE FROM tasks WHERE org = ? AND source_file NOT IN (${placeholders})`,
-      ).run(org, ...activePaths);
-    } else {
-      // No files at all — delete all tasks for this org
-      db.prepare('DELETE FROM tasks WHERE org = ?').run(org);
-    }
-  });
+  if (rows.length === 0) {
+    await supabase.from('tasks').delete().eq('org', org);
+    return 0;
+  }
 
-  run();
-  return synced;
+  const { error } = await supabase.from('tasks').upsert(rows, { onConflict: 'id' });
+  if (error) console.error('[sync] Task upsert error:', error);
+
+  // Prune rows whose source files no longer exist
+  const activePaths = rows.map((r) => r.source_file as string);
+  await supabase
+    .from('tasks')
+    .delete()
+    .eq('org', org)
+    .not('source_file', 'in', `(${activePaths.map((p) => `"${p}"`).join(',')})`);
+
+  return rows.length;
 }
 
 // ---------------------------------------------------------------------------
 // Approval sync
 // ---------------------------------------------------------------------------
 
-export function syncApprovals(org: string): number {
+export async function syncApprovals(org: string): Promise<number> {
   const approvalDir = getApprovalDir(org);
-  let synced = 0;
+  const rows: Record<string, unknown>[] = [];
 
-  const upsert = db.prepare(`
-    INSERT OR REPLACE INTO approvals
-      (id, title, category, description, status, agent, org, created_at, resolved_at, resolved_by, resolution_note, source_file)
-    VALUES
-      (@id, @title, @category, @description, @status, @agent, @org, @created_at, @resolved_at, @resolved_by, @resolution_note, @source_file)
-  `);
+  for (const subdir of ['pending', 'resolved'] as const) {
+    const dir = path.join(approvalDir, subdir);
+    if (!fs.existsSync(dir)) continue;
 
-  const run = db.transaction(() => {
-    for (const subdir of ['pending', 'resolved'] as const) {
-      const dir = path.join(approvalDir, subdir);
-      if (!fs.existsSync(dir)) continue;
-
-      const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
-      for (const file of files) {
-        const filePath = path.join(dir, file);
-        if (!hasFileChanged(filePath)) continue;
-
-        try {
-          const raw = fs.readFileSync(filePath, 'utf-8');
-          const approval = JSON.parse(raw);
-          upsert.run({
-            id: approval.id ?? path.basename(file, '.json'),
-            title: approval.title ?? 'Untitled',
-            category: approval.category ?? 'other',
-            description: approval.description ?? null,
-            status:
-              subdir === 'pending'
-                ? 'pending'
-                : (approval.status ?? 'approved'),
-            agent: approval.requesting_agent ?? approval.agent ?? 'unknown',
-            org,
-            created_at: approval.created_at ?? new Date().toISOString(),
-            resolved_at: approval.resolved_at ?? null,
-            resolved_by: approval.resolved_by ?? null,
-            resolution_note: approval.resolution_note ?? null,
-            source_file: filePath,
-          });
-          markSynced(filePath);
-          synced++;
-        } catch (err) {
-          console.error(`[sync] Failed to sync approval ${file}:`, err);
-        }
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
+    for (const file of files) {
+      const filePath = path.join(dir, file);
+      try {
+        const raw = fs.readFileSync(filePath, 'utf-8');
+        const approval = JSON.parse(raw);
+        rows.push({
+          id: approval.id ?? path.basename(file, '.json'),
+          title: approval.title ?? 'Untitled',
+          category: approval.category ?? 'other',
+          description: approval.description ?? null,
+          status: subdir === 'pending' ? 'pending' : (approval.status ?? 'approved'),
+          agent: approval.requesting_agent ?? approval.agent ?? 'unknown',
+          org,
+          created_at: approval.created_at ?? new Date().toISOString(),
+          resolved_at: approval.resolved_at ?? null,
+          resolved_by: approval.resolved_by ?? null,
+          resolution_note: approval.resolution_note ?? null,
+          source_file: filePath,
+        });
+      } catch (err) {
+        console.error(`[sync] Failed to parse approval ${file}:`, err);
       }
     }
-  });
+  }
 
-  run();
-  return synced;
+  if (rows.length > 0) {
+    const { error } = await supabase.from('approvals').upsert(rows, { onConflict: 'id' });
+    if (error) console.error('[sync] Approval upsert error:', error);
+  }
+
+  return rows.length;
 }
 
 // ---------------------------------------------------------------------------
 // Event sync (JSONL)
 // ---------------------------------------------------------------------------
 
-export function syncEvents(org: string, agent: string): number {
+export async function syncEvents(org: string, agent: string): Promise<number> {
   const eventsDir = getEventsDir(org, agent);
   if (!fs.existsSync(eventsDir)) return 0;
 
-  let synced = 0;
-
-  const upsert = db.prepare(`
-    INSERT OR REPLACE INTO events
-      (id, timestamp, agent, org, type, category, severity, data, message, source_file)
-    VALUES
-      (@id, @timestamp, @agent, @org, @type, @category, @severity, @data, @message, @source_file)
-  `);
-
   const files = fs.readdirSync(eventsDir).filter((f) => f.endsWith('.jsonl'));
+  const rows: Record<string, unknown>[] = [];
 
-  const run = db.transaction(() => {
-    for (const file of files) {
-      const filePath = path.join(eventsDir, file);
-      if (!hasFileChanged(filePath)) continue;
+  for (const file of files) {
+    const filePath = path.join(eventsDir, file);
+    try {
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      const lines = raw.split('\n').filter((l) => l.trim());
 
-      try {
-        const raw = fs.readFileSync(filePath, 'utf-8');
-        const lines = raw.split('\n').filter((l) => l.trim());
-
-        for (let i = 0; i < lines.length; i++) {
-          try {
-            const event = JSON.parse(lines[i]);
-            const eventId = event.id ?? `${agent}-${file}-${i}`;
-            upsert.run({
-              id: eventId,
-              timestamp: event.timestamp ?? new Date().toISOString(),
-              agent: event.agent ?? agent,
-              org,
-              type: event.category ?? event.type ?? 'action',
-              category: event.category ?? null,
-              severity: event.severity ?? 'info',
-              data: event.metadata ? JSON.stringify(event.metadata) : (event.data ? JSON.stringify(event.data) : null),
-              message: event.event ?? event.message ?? null,
-              source_file: filePath,
-            });
-            synced++;
-          } catch {
-            console.warn(
-              `[sync] Skipping malformed JSONL line ${i} in ${filePath}`,
-            );
-          }
+      for (let i = 0; i < lines.length; i++) {
+        try {
+          const event = JSON.parse(lines[i]);
+          rows.push({
+            id: event.id ?? `${agent}-${file}-${i}`,
+            timestamp: event.timestamp ?? new Date().toISOString(),
+            agent: event.agent ?? agent,
+            org,
+            type: event.category ?? event.type ?? 'action',
+            category: event.category ?? null,
+            severity: event.severity ?? 'info',
+            data: event.metadata
+              ? JSON.stringify(event.metadata)
+              : event.data
+                ? JSON.stringify(event.data)
+                : null,
+            message: event.event ?? event.message ?? null,
+            source_file: filePath,
+          });
+        } catch {
+          // skip malformed lines
         }
-        markSynced(filePath);
-      } catch (err) {
-        console.error(`[sync] Failed to sync events ${file}:`, err);
       }
+    } catch (err) {
+      console.error(`[sync] Failed to read events ${file}:`, err);
     }
-  });
+  }
 
-  run();
-  return synced;
+  if (rows.length > 0) {
+    // Batch upsert in chunks of 500 to avoid payload limits
+    for (let i = 0; i < rows.length; i += 500) {
+      const chunk = rows.slice(i, i + 500);
+      const { error } = await supabase.from('events').upsert(chunk, { onConflict: 'id' });
+      if (error) console.error('[sync] Event upsert error:', error);
+    }
+  }
+
+  return rows.length;
 }
 
 // ---------------------------------------------------------------------------
 // Heartbeat sync
 // ---------------------------------------------------------------------------
 
-export function syncHeartbeat(agent: string): boolean {
+export async function syncHeartbeat(agent: string): Promise<boolean> {
   const heartbeatPath = getHeartbeatPath(agent);
   if (!fs.existsSync(heartbeatPath)) return false;
-  if (!hasFileChanged(heartbeatPath)) return false;
 
   try {
     const raw = fs.readFileSync(heartbeatPath, 'utf-8');
     const hb = JSON.parse(raw);
 
-    db.prepare(
-      `INSERT OR REPLACE INTO heartbeats
-        (agent, org, status, current_task, mode, last_heartbeat, loop_interval, uptime_seconds)
-       VALUES
-        (@agent, @org, @status, @current_task, @mode, @last_heartbeat, @loop_interval, @uptime_seconds)`,
-    ).run({
-      agent,
-      org: hb.org ?? '',
-      status: hb.status ?? null,
-      current_task: hb.current_task ?? null,
-      mode: hb.mode ?? null,
-      last_heartbeat: hb.last_heartbeat ?? hb.timestamp ?? null,
-      loop_interval: hb.loop_interval ?? null,
-      uptime_seconds: hb.uptime_seconds ?? null,
-    });
-    markSynced(heartbeatPath);
+    const { error } = await supabase.from('heartbeats').upsert(
+      {
+        agent,
+        org: hb.org ?? '',
+        status: hb.status ?? null,
+        current_task: hb.current_task ?? null,
+        mode: hb.mode ?? null,
+        last_heartbeat: hb.last_heartbeat ?? hb.timestamp ?? null,
+        loop_interval: hb.loop_interval ?? null,
+        uptime_seconds: hb.uptime_seconds ?? null,
+      },
+      { onConflict: 'agent' },
+    );
+    if (error) console.error('[sync] Heartbeat upsert error:', error);
     return true;
   } catch (err) {
     console.error(`[sync] Failed to sync heartbeat for ${agent}:`, err);
@@ -276,15 +213,14 @@ export interface SyncResult {
   heartbeats: number;
 }
 
-export function syncAll(): SyncResult {
+export async function syncAll(): Promise<SyncResult> {
   const results: SyncResult = { tasks: 0, approvals: 0, events: 0, heartbeats: 0 };
 
   const orgs = getOrgs();
   for (const org of orgs) {
-    results.tasks += syncTasks(org);
-    results.approvals += syncApprovals(org);
+    results.tasks += await syncTasks(org);
+    results.approvals += await syncApprovals(org);
 
-    // Scan events directory directly for agent subdirs (agents may not exist in state dir)
     const eventsBaseDir = path.join(CTX_ROOT, 'orgs', org, 'analytics', 'events');
     if (fs.existsSync(eventsBaseDir)) {
       const eventAgentDirs = fs
@@ -292,19 +228,18 @@ export function syncAll(): SyncResult {
         .filter((d) => d.isDirectory())
         .map((d) => d.name);
       for (const agent of eventAgentDirs) {
-        results.events += syncEvents(org, agent);
+        results.events += await syncEvents(org, agent);
       }
     }
   }
 
-  // Heartbeats are flat (not org-scoped)
   const stateDir = path.join(CTX_ROOT, 'state');
   if (fs.existsSync(stateDir)) {
     const agentDirs = fs
       .readdirSync(stateDir, { withFileTypes: true })
       .filter((d) => d.isDirectory());
     for (const agentDir of agentDirs) {
-      if (syncHeartbeat(agentDir.name)) results.heartbeats++;
+      if (await syncHeartbeat(agentDir.name)) results.heartbeats++;
     }
   }
 
@@ -316,66 +251,62 @@ export function syncAll(): SyncResult {
       for (const [name, config] of Object.entries(enabled)) {
         const agentOrg = (config as Record<string, string>).org ?? '';
         if (agentOrg) {
-          db.prepare('UPDATE heartbeats SET org = ? WHERE agent = ? AND (org IS NULL OR org = \'\')').run(agentOrg, name);
+          await supabase
+            .from('heartbeats')
+            .update({ org: agentOrg })
+            .eq('agent', name)
+            .or("org.is.null,org.eq.");
         }
       }
     }
   } catch {
-    // Best effort
+    // best effort
   }
-
-  // Cost sync moved to syncCostsLazy() - only runs when Analytics page is visited
 
   console.log(`[sync] Full sync complete:`, results);
   return results;
 }
 
 // ---------------------------------------------------------------------------
-// Lazy cost sync (only called from Analytics page)
+// Lazy cost sync
 // ---------------------------------------------------------------------------
 
 const COST_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
-export function syncCostsLazy(): void {
+export async function syncCostsLazy(): Promise<void> {
   const now = Date.now();
   const lastCostSync = (globalThis as unknown as Record<string, number>).__lastCostSync ?? 0;
   if (now - lastCostSync > COST_SYNC_INTERVAL_MS) {
     try {
-      const { syncCosts } = require('./cost-parser');
-      const costResult = syncCosts();
+      const { syncCosts } = await import('./cost-parser');
+      const costResult = await syncCosts();
       (globalThis as unknown as Record<string, number>).__lastCostSync = now;
       if (costResult.inserted > 0) {
         console.log(`[sync] Cost sync: ${costResult.scanned} scanned, ${costResult.inserted} inserted`);
       }
     } catch {
-      // Cost sync is best-effort
+      // best effort
     }
   }
 }
 
 // ---------------------------------------------------------------------------
-// Single-file sync (called by file watcher)
+// Single-file sync
 // ---------------------------------------------------------------------------
 
-export function syncFile(filePath: string): void {
+export async function syncFile(filePath: string): Promise<void> {
   if (filePath.includes('/tasks/') && filePath.endsWith('.json')) {
     const org = extractOrgFromPath(filePath);
-    if (org) syncTasks(org);
+    if (org) await syncTasks(org);
   } else if (filePath.includes('/approvals/') && filePath.endsWith('.json')) {
     const org = extractOrgFromPath(filePath);
-    if (org) syncApprovals(org);
-  } else if (
-    filePath.includes('/analytics/events/') &&
-    filePath.endsWith('.jsonl')
-  ) {
+    if (org) await syncApprovals(org);
+  } else if (filePath.includes('/analytics/events/') && filePath.endsWith('.jsonl')) {
     const { org, agent } = extractOrgAndAgentFromEventPath(filePath);
-    if (org && agent) syncEvents(org, agent);
-  } else if (
-    filePath.includes('/state/') &&
-    filePath.endsWith('heartbeat.json')
-  ) {
+    if (org && agent) await syncEvents(org, agent);
+  } else if (filePath.includes('/state/') && filePath.endsWith('heartbeat.json')) {
     const agent = extractAgentFromStatePath(filePath);
-    if (agent) syncHeartbeat(agent);
+    if (agent) await syncHeartbeat(agent);
   }
 }
 
@@ -391,9 +322,7 @@ export function extractOrgFromPath(filePath: string): string | null {
 export function extractOrgAndAgentFromEventPath(
   filePath: string,
 ): { org: string | null; agent: string | null } {
-  const match = filePath.match(
-    /\/orgs\/([^/]+)\/analytics\/events\/([^/]+)\//,
-  );
+  const match = filePath.match(/\/orgs\/([^/]+)\/analytics\/events\/([^/]+)\//);
   return { org: match?.[1] ?? null, agent: match?.[2] ?? null };
 }
 

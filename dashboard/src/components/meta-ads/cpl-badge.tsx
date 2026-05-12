@@ -24,7 +24,7 @@ export function CplBadge({ value, className }: CplBadgeProps) {
   let colorClass: string;
   let label: string;
 
-  if (value < 10) {
+  if (value < 8) {
     colorClass = 'bg-green-500/15 text-green-500 ring-green-500/20';
     label = 'Great';
   } else if (value < 12) {

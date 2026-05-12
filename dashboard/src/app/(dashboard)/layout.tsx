@@ -12,10 +12,8 @@ export default async function DashboardLayout({
   const session = await auth();
   if (!session) redirect('/login');
 
-  // Sync filesystem state to SQLite on every page load
-  // This ensures the dashboard always reflects the latest agent activity
   try {
-    syncAll();
+    await syncAll();
   } catch (e) {
     console.error('Sync failed:', e);
   }

@@ -1,20 +1,8 @@
 import { NextRequest } from 'next/server';
-import { db } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 
-/**
- * GET /api/events - Query historical events from SQLite.
- *
- * Query params:
- *   limit  - max rows (default 50, max 500)
- *   offset - pagination offset (default 0)
- *   type   - filter by event type
- *   agent  - filter by agent name
- *   org    - filter by org
- *   from   - ISO date lower bound (inclusive)
- *   to     - ISO date upper bound (inclusive)
- */
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
 
@@ -32,44 +20,24 @@ export async function GET(request: NextRequest) {
   const from = searchParams.get('from');
   const to = searchParams.get('to');
 
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (type) {
-    conditions.push('type = ?');
-    params.push(type);
-  }
-  if (agent) {
-    conditions.push('agent = ?');
-    params.push(agent);
-  }
-  if (org) {
-    conditions.push('org = ?');
-    params.push(org);
-  }
-  if (from) {
-    conditions.push('timestamp >= ?');
-    params.push(from);
-  }
-  if (to) {
-    conditions.push('timestamp <= ?');
-    params.push(to);
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
   try {
-    const rows = db
-      .prepare(
-        `SELECT id, timestamp, agent, org, type, category, severity, data, message, source_file
-         FROM events ${where}
-         ORDER BY timestamp DESC
-         LIMIT ? OFFSET ?`
-      )
-      .all(...params, limit, offset);
+    let query = supabase
+      .from('events')
+      .select('*')
+      .order('timestamp', { ascending: false })
+      .limit(limit)
+      .range(offset, offset + limit - 1);
 
-    // Parse the data column from JSON string back to object
-    const events = (rows as Record<string, unknown>[]).map((row) => ({
+    if (type) query = query.eq('type', type);
+    if (agent) query = query.eq('agent', agent);
+    if (org) query = query.eq('org', org);
+    if (from) query = query.gte('timestamp', from);
+    if (to) query = query.lte('timestamp', to);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const events = (data ?? []).map((row) => ({
       ...row,
       data: row.data ? JSON.parse(row.data as string) : null,
     }));

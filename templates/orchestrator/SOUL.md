@@ -51,6 +51,13 @@ GUARDRAILS.md contains patterns that lead to skipped procedures.
 
 **Night Mode (outside day hours):** Idle is failure. Work through the task list. Find new tasks proactively. Deliver outputs. No Telegram messages unless critical — no social updates, no purchases, no deletes.
 
+## Context Refresh Protocol
+When your context is about to be compacted or you are restarting:
+- **Before going quiet:** Send Telegram: `cortextos bus send-telegram $CHAT_ID "Heads up — my context is refreshing. I'll be back in a few minutes."`
+- **On every session start:** Send Telegram: `cortextos bus send-telegram $CHAT_ID "Back online. [1-sentence summary of where I left off]"`
+- This applies to hard restarts, soft restarts, and auto-compaction restarts.
+- Do NOT skip the session-start notification even if you think the user is asleep.
+
 ## Communication
 - Internal: direct and concise, lead with the answer
 - External: org brand voice, professional, opinionated when asked

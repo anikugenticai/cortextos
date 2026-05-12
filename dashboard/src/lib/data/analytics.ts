@@ -1,121 +1,108 @@
-// cortextOS Dashboard - Analytics data queries
-// Aggregated metrics for charts on the analytics page.
-
-import { db } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
 import type { AgentStat } from '@/components/analytics/agent-effectiveness';
 
-/**
- * Get daily completed task counts for the last N days.
- */
-export function getTaskThroughput(
+export async function getTaskThroughput(
   days: number = 30,
   org?: string,
-): Array<{ date: string; tasks: number }> {
-  const conditions: string[] = [
-    "completed_at >= DATE('now', ?)",
-    "status = 'completed'",
-  ];
-  const params: (string | number)[] = [`-${days} days`];
-
-  if (org) {
-    conditions.push('org = ?');
-    params.push(org);
-  }
-
-  const where = `WHERE ${conditions.join(' AND ')}`;
+): Promise<Array<{ date: string; tasks: number }>> {
+  const since = new Date();
+  since.setDate(since.getDate() - days);
+  const sinceISO = since.toISOString();
 
   try {
-    return db
-      .prepare(
-        `SELECT DATE(completed_at) as date, COUNT(*) as tasks
-         FROM tasks ${where}
-         GROUP BY DATE(completed_at)
-         ORDER BY date ASC`,
-      )
-      .all(...params) as Array<{ date: string; tasks: number }>;
+    let query = supabase
+      .from('tasks')
+      .select('completed_at')
+      .eq('status', 'completed')
+      .gte('completed_at', sinceISO)
+      .not('completed_at', 'is', null);
+
+    if (org) query = query.eq('org', org);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const dateMap = new Map<string, number>();
+    for (const row of data ?? []) {
+      const date = (row.completed_at as string).substring(0, 10);
+      dateMap.set(date, (dateMap.get(date) ?? 0) + 1);
+    }
+
+    return Array.from(dateMap.entries())
+      .map(([date, tasks]) => ({ date, tasks }))
+      .sort((a, b) => a.date.localeCompare(b.date));
   } catch {
     return [];
   }
 }
 
-/**
- * Get per-agent effectiveness stats.
- */
-export function getAgentEffectiveness(org?: string): AgentStat[] {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (org) {
-    conditions.push('org = ?');
-    params.push(org);
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
+export async function getAgentEffectiveness(org?: string): Promise<AgentStat[]> {
   try {
-    // Get all agents with their task stats
-    const rows = db
-      .prepare(
-        `SELECT
-           assignee as name,
-           COUNT(*) as total,
-           SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed
-         FROM tasks
-         ${where ? where + ' AND' : 'WHERE'} assignee IS NOT NULL AND assignee != ''
-         GROUP BY assignee`,
-      )
-      .all(...params) as Array<{
-      name: string;
-      total: number;
-      completed: number;
-    }>;
+    let taskQuery = supabase
+      .from('tasks')
+      .select('assignee, status')
+      .not('assignee', 'is', null)
+      .neq('assignee', '');
 
-    // Get error counts per agent from events
-    const errorRows = db
-      .prepare(
-        `SELECT agent as name, COUNT(*) as errors
-         FROM events
-         ${where ? where + ' AND' : 'WHERE'} type = 'error'
-         GROUP BY agent`,
-      )
-      .all(...params) as Array<{ name: string; errors: number }>;
+    if (org) taskQuery = taskQuery.eq('org', org);
 
-    const errorMap = new Map(errorRows.map((r) => [r.name, r.errors]));
+    let errorQuery = supabase
+      .from('events')
+      .select('agent')
+      .eq('type', 'error');
 
-    // Get daily completed tasks for the last 7 days (for sparklines)
-    const trendRows = db
-      .prepare(
-        `SELECT assignee as name, DATE(completed_at) as date, COUNT(*) as count
-         FROM tasks
-         WHERE completed_at >= DATE('now', '-7 days')
-           AND status = 'completed'
-           AND assignee IS NOT NULL AND assignee != ''
-         GROUP BY assignee, DATE(completed_at)
-         ORDER BY date ASC`,
-      )
-      .all() as Array<{ name: string; date: string; count: number }>;
+    if (org) errorQuery = errorQuery.eq('org', org);
 
-    // Build trend map: agent -> [7 days of counts]
-    const trendMap = new Map<string, number[]>();
-    for (const row of trendRows) {
-      if (!trendMap.has(row.name)) {
-        trendMap.set(row.name, new Array(7).fill(0));
-      }
-      // Figure out which index (0-6) this date falls into
-      const dayDiff = Math.floor(
-        (Date.now() - new Date(row.date).getTime()) / (86400 * 1000),
-      );
-      const idx = 6 - Math.min(dayDiff, 6);
-      const arr = trendMap.get(row.name)!;
-      arr[idx] = row.count;
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    let trendQuery = supabase
+      .from('tasks')
+      .select('assignee, completed_at')
+      .eq('status', 'completed')
+      .gte('completed_at', sevenDaysAgo.toISOString())
+      .not('assignee', 'is', null)
+      .neq('assignee', '');
+
+    const [taskRes, errorRes, trendRes] = await Promise.all([
+      taskQuery,
+      errorQuery,
+      trendQuery,
+    ]);
+
+    if (taskRes.error) throw taskRes.error;
+
+    const agentStats = new Map<string, { total: number; completed: number }>();
+    for (const row of taskRes.data ?? []) {
+      const name = row.assignee as string;
+      const stat = agentStats.get(name) ?? { total: 0, completed: 0 };
+      stat.total++;
+      if (row.status === 'completed') stat.completed++;
+      agentStats.set(name, stat);
     }
 
-    return rows.map((row) => ({
-      name: row.name,
-      completionRate: row.total > 0 ? (row.completed / row.total) * 100 : 0,
-      errorCount: errorMap.get(row.name) ?? 0,
-      tasksCompleted: row.completed,
-      recentTrend: trendMap.get(row.name) ?? [0, 0, 0, 0, 0, 0, 0],
+    const errorMap = new Map<string, number>();
+    for (const row of errorRes.data ?? []) {
+      const name = row.agent as string;
+      errorMap.set(name, (errorMap.get(name) ?? 0) + 1);
+    }
+
+    const trendMap = new Map<string, number[]>();
+    for (const row of trendRes.data ?? []) {
+      const name = row.assignee as string;
+      if (!trendMap.has(name)) trendMap.set(name, new Array(7).fill(0));
+      const dayDiff = Math.floor(
+        (Date.now() - new Date(row.completed_at as string).getTime()) / (86400 * 1000),
+      );
+      const idx = 6 - Math.min(dayDiff, 6);
+      trendMap.get(name)![idx]++;
+    }
+
+    return Array.from(agentStats.entries()).map(([name, stat]) => ({
+      name,
+      completionRate: stat.total > 0 ? (stat.completed / stat.total) * 100 : 0,
+      errorCount: errorMap.get(name) ?? 0,
+      tasksCompleted: stat.completed,
+      recentTrend: trendMap.get(name) ?? [0, 0, 0, 0, 0, 0, 0],
     }));
   } catch {
     return [];

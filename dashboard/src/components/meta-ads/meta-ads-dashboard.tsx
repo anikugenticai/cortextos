@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { AccountSelector } from './account-selector';
 import { MetricsSummary } from './metrics-summary';
 import { AdsTable } from './ads-table';
+import { BudgetSuggestions } from './budget-suggestions';
 import { IconRefresh, IconAlertTriangle, IconLoader2 } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 
@@ -287,6 +288,9 @@ export function MetaAdsDashboard() {
 
       {/* Summary cards */}
       <MetricsSummary metrics={summary} loading={loadingSummary} />
+
+      {/* Budget intelligence */}
+      {!loadingCampaigns && <BudgetSuggestions campaigns={campaigns} />}
 
       {/* Campaign table with drill-down */}
       <Card className="overflow-hidden">

@@ -44,7 +44,7 @@ export function DashboardShell({ orgs, children }: DashboardShellProps) {
 
         {/* Mobile sidebar sheet */}
         <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
-          <SheetContent side="left" className="w-60 p-0" showCloseButton={false}>
+          <SheetContent side="left" className="p-0" style={{ width: 232 }} showCloseButton={false}>
             <Sidebar onNavigate={() => setSidebarOpen(false)} />
           </SheetContent>
         </Sheet>
@@ -56,7 +56,7 @@ export function DashboardShell({ orgs, children }: DashboardShellProps) {
             onOrgChange={setCurrentOrg}
             onMenuClick={() => setSidebarOpen(true)}
           />
-          <main className="flex-1 overflow-auto p-4 pb-20 md:pb-5 md:p-5 lg:p-6 bg-background">
+          <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 pb-20 md:pb-5 md:p-5 lg:p-6 bg-background">
             {children}
           </main>
 

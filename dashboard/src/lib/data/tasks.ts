@@ -1,179 +1,104 @@
-// cortextOS Dashboard - Task data fetcher
-// Reads from SQLite (synced from JSON task files on disk).
-
-import { db } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
 import type { Task, TaskFilters } from '@/lib/types';
 
-/**
- * Get tasks with optional filters.
- * Returns newest first by default.
- */
-export function getTasks(filters?: TaskFilters): Task[] {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (filters?.org) {
-    conditions.push('org = ?');
-    params.push(filters.org);
-  }
-  if (filters?.agent) {
-    // 'human' is a virtual filter: returns tasks assigned to any non-agent human
-    // (agents create human tasks with assigned_to 'user', 'human', etc.)
-    if (filters.agent === 'human') {
-      conditions.push("(assignee IN ('human', 'user') OR title LIKE '[HUMAN]%' OR project = 'human-tasks')");
-    } else {
-      conditions.push('assignee = ?');
-      params.push(filters.agent);
-    }
-  }
-  if (filters?.priority) {
-    conditions.push('priority = ?');
-    params.push(filters.priority);
-  }
-  if (filters?.status) {
-    conditions.push('status = ?');
-    params.push(filters.status);
-  }
-  if (filters?.project) {
-    conditions.push('project = ?');
-    params.push(filters.project);
-  }
-  if (filters?.search) {
-    conditions.push('(title LIKE ? OR description LIKE ?)');
-    const term = `%${filters.search}%`;
-    params.push(term, term);
-  }
-
-  const where =
-    conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
+export async function getTasks(filters?: TaskFilters): Promise<Task[]> {
   try {
-    const rows = db
-      .prepare(
-        `SELECT id, title, description, status, priority, assignee, org, project,
-                needs_approval, created_at, updated_at, completed_at, notes, source_file
-         FROM tasks ${where}
-         ORDER BY created_at DESC`
-      )
-      .all(...params) as Record<string, unknown>[];
+    let query = supabase
+      .from('tasks')
+      .select('*')
+      .order('created_at', { ascending: false });
 
-    return rows.map(rowToTask);
+    if (filters?.org) query = query.eq('org', filters.org);
+    if (filters?.agent) {
+      if (filters.agent === 'human') {
+        query = query.or("assignee.in.(human,user),title.like.[HUMAN]%,project.eq.human-tasks");
+      } else {
+        query = query.eq('assignee', filters.agent);
+      }
+    }
+    if (filters?.priority) query = query.eq('priority', filters.priority);
+    if (filters?.status) query = query.eq('status', filters.status);
+    if (filters?.project) query = query.eq('project', filters.project);
+    if (filters?.search) {
+      query = query.or(`title.ilike.%${filters.search}%,description.ilike.%${filters.search}%`);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []).map(rowToTask);
   } catch (err) {
     console.error('[data/tasks] getTasks error:', err);
     return [];
   }
 }
 
-/**
- * Get a single task by ID.
- */
-export function getTaskById(id: string): Task | null {
+export async function getTaskById(id: string): Promise<Task | null> {
   try {
-    const row = db
-      .prepare(
-        `SELECT id, title, description, status, priority, assignee, org, project,
-                needs_approval, created_at, updated_at, completed_at, notes, source_file
-         FROM tasks WHERE id = ?`
-      )
-      .get(id) as Record<string, unknown> | undefined;
-
-    return row ? rowToTask(row) : null;
+    const { data, error } = await supabase
+      .from('tasks')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? rowToTask(data) : null;
   } catch (err) {
     console.error('[data/tasks] getTaskById error:', err);
     return null;
   }
 }
 
-/**
- * Get tasks filtered by status (useful for kanban columns).
- */
-export function getTasksByStatus(status: string, org?: string): Task[] {
+export async function getTasksByStatus(status: string, org?: string): Promise<Task[]> {
   return getTasks({ status, org });
 }
 
-/**
- * Get tasks assigned to a specific agent.
- */
-export function getTasksByAgent(agentName: string, org?: string): Task[] {
+export async function getTasksByAgent(agentName: string, org?: string): Promise<Task[]> {
   return getTasks({ agent: agentName, org });
 }
 
-/**
- * Get tasks completed today (UTC).
- */
-export function getTasksCompletedToday(org?: string): Task[] {
+export async function getTasksCompletedToday(org?: string): Promise<Task[]> {
   const todayStart = new Date();
   todayStart.setUTCHours(0, 0, 0, 0);
   const todayISO = todayStart.toISOString();
 
-  const conditions: string[] = ['completed_at >= ?'];
-  const params: (string | number)[] = [todayISO];
-
-  if (org) {
-    conditions.push('org = ?');
-    params.push(org);
-  }
-
-  const where = `WHERE ${conditions.join(' AND ')}`;
-
   try {
-    const rows = db
-      .prepare(
-        `SELECT id, title, description, status, priority, assignee, org, project,
-                needs_approval, created_at, updated_at, completed_at, notes, source_file
-         FROM tasks ${where}
-         ORDER BY completed_at DESC`
-      )
-      .all(...params) as Record<string, unknown>[];
+    let query = supabase
+      .from('tasks')
+      .select('*')
+      .gte('completed_at', todayISO)
+      .order('completed_at', { ascending: false });
 
-    return rows.map(rowToTask);
+    if (org) query = query.eq('org', org);
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []).map(rowToTask);
   } catch (err) {
     console.error('[data/tasks] getTasksCompletedToday error:', err);
     return [];
   }
 }
 
-/**
- * Get count of in-progress tasks (for sidebar badge).
- */
-export function getInProgressCount(org?: string): number {
+export async function getInProgressCount(org?: string): Promise<number> {
   return getTaskCount(org, 'in_progress');
 }
 
-/**
- * Get count of tasks matching optional org/status.
- */
-export function getTaskCount(org?: string, status?: string): number {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (org) {
-    conditions.push('org = ?');
-    params.push(org);
-  }
-  if (status) {
-    conditions.push('status = ?');
-    params.push(status);
-  }
-
-  const where =
-    conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
+export async function getTaskCount(org?: string, status?: string): Promise<number> {
   try {
-    const row = db
-      .prepare(`SELECT COUNT(*) as count FROM tasks ${where}`)
-      .get(...params) as { count: number } | undefined;
+    let query = supabase
+      .from('tasks')
+      .select('*', { count: 'exact', head: true });
 
-    return row?.count ?? 0;
+    if (org) query = query.eq('org', org);
+    if (status) query = query.eq('status', status);
+
+    const { count, error } = await query;
+    if (error) throw error;
+    return count ?? 0;
   } catch (err) {
     console.error('[data/tasks] getTaskCount error:', err);
     return 0;
   }
 }
-
-// ---------------------------------------------------------------------------
-// Row mapping
-// ---------------------------------------------------------------------------
 
 function rowToTask(row: Record<string, unknown>): Task {
   return {
@@ -185,7 +110,7 @@ function rowToTask(row: Record<string, unknown>): Task {
     assignee: (row.assignee as string) ?? undefined,
     org: row.org as string,
     project: (row.project as string) ?? undefined,
-    needs_approval: row.needs_approval === 1,
+    needs_approval: row.needs_approval === true || row.needs_approval === 1,
     created_at: row.created_at as string,
     updated_at: (row.updated_at as string) ?? undefined,
     completed_at: (row.completed_at as string) ?? undefined,

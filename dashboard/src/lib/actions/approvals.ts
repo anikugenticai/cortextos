@@ -54,9 +54,9 @@ export async function resolveApproval(
       throw new Error(result.stderr || result.stdout || 'update-approval.sh failed');
     }
 
-    // Sync so SQLite reflects the change
+    // Sync so Supabase reflects the change
     try {
-      syncAll();
+      await syncAll();
     } catch {
       // Sync is best-effort
     }

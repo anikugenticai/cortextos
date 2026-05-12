@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 96" fill="none" role="img" aria-label="SaijeIQ">
+  
+  <g transform="translate(8, 20)">
+    <g stroke="#FFFFFF" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="14" y1="15.2" x2="28" y2="25.7"></line>
+      <line x1="42" y1="15.2" x2="28" y2="25.7"></line>
+      <line x1="14" y1="40.8" x2="28" y2="25.7"></line>
+      <line x1="42" y1="40.8" x2="28" y2="25.7"></line>
+      <line x1="14" y1="15.2" x2="14" y2="40.8"></line>
+      <line x1="42" y1="15.2" x2="42" y2="40.8"></line>
+    </g>
+    <circle cx="14" cy="15.2" r="3" fill="#FFFFFF"></circle>
+    <circle cx="42" cy="15.2" r="3" fill="#FFFFFF"></circle>
+    <circle cx="14" cy="40.8" r="3" fill="#FFFFFF"></circle>
+    <circle cx="42" cy="40.8" r="3" fill="#FFFFFF"></circle>
+    <circle cx="28" cy="25.7" r="3.7" fill="#FFFFFF"></circle>
+  </g>
+  <text x="72" y="66" class="wm"><tspan class="base">S</tspan><tspan class="ai">ai</tspan><tspan class="base">je</tspan><tspan class="iq" dy="-22">IQ</tspan></text>
+</svg>

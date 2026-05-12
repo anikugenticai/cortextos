@@ -5,8 +5,8 @@ import path from 'path';
 import bcrypt from 'bcryptjs';
 import { revalidatePath } from 'next/cache';
 import { CTX_ROOT, getOrgs, getAgentsForOrg, getAgentDir, getOrgContextPath, getOrgBrandVoicePath, getAllowedRootsConfigPath } from '@/lib/config';
-import { db } from '@/lib/db';
-import type { ActionResult, User } from '@/lib/types';
+import { supabase } from '@/lib/supabase';
+import type { ActionResult } from '@/lib/types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -230,8 +230,12 @@ export async function saveSystemConfig(config: SystemConfig): Promise<ActionResu
 
 export async function fetchUsers(): Promise<Array<{ id: number; username: string; created_at: string }>> {
   try {
-    const rows = db.prepare('SELECT id, username, created_at FROM users ORDER BY id').all() as User[];
-    return rows.map((r) => ({ id: r.id, username: r.username, created_at: r.created_at }));
+    const { data, error } = await supabase
+      .from('users')
+      .select('id, username, created_at')
+      .order('id');
+    if (error) throw error;
+    return (data ?? []).map((r) => ({ id: r.id as number, username: r.username as string, created_at: r.created_at as string }));
   } catch {
     return [];
   }
@@ -245,12 +249,18 @@ export async function addUser(username: string, password: string): Promise<Actio
     if (trimmed.length > 50) return { success: false, error: 'Username must be under 50 characters' };
     if (!password || password.length < 6) return { success: false, error: 'Password must be at least 6 characters' };
 
-    // Check for duplicate
-    const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(trimmed) as User | undefined;
+    const { data: existing } = await supabase
+      .from('users')
+      .select('id')
+      .eq('username', trimmed)
+      .maybeSingle();
     if (existing) return { success: false, error: 'Username already exists' };
 
     const hash = await bcrypt.hash(password, 12);
-    db.prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)').run(trimmed, hash);
+    const { error } = await supabase
+      .from('users')
+      .insert({ username: trimmed, password_hash: hash });
+    if (error) throw error;
 
     revalidatePath('/settings');
     return { success: true };
@@ -261,16 +271,19 @@ export async function addUser(username: string, password: string): Promise<Actio
 
 export async function deleteUser(userId: number): Promise<ActionResult> {
   try {
-    // Prevent deleting the last user
-    const count = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
-    if (count.count <= 1) {
+    const { count, error: countErr } = await supabase
+      .from('users')
+      .select('*', { count: 'exact', head: true });
+    if (countErr) throw countErr;
+    if ((count ?? 0) <= 1) {
       return { success: false, error: 'Cannot delete the last user' };
     }
 
-    const result = db.prepare('DELETE FROM users WHERE id = ?').run(userId);
-    if (result.changes === 0) {
-      return { success: false, error: 'User not found' };
-    }
+    const { error } = await supabase
+      .from('users')
+      .delete()
+      .eq('id', userId);
+    if (error) throw error;
 
     revalidatePath('/settings');
     return { success: true };

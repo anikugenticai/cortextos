@@ -29,7 +29,7 @@ export async function GET(
   }
 
   try {
-    const approval = getApprovalById(id);
+    const approval = await getApprovalById(id);
     if (!approval) {
       return Response.json({ error: 'Approval not found' }, { status: 404 });
     }
@@ -91,7 +91,7 @@ export async function PATCH(
     : undefined;
 
   // Look up the approval's org to pass CTX_ORG to bus script
-  const approval = getApprovalById(id);
+  const approval = await getApprovalById(id);
   if (!approval) {
     return Response.json({ error: 'Approval not found in pending' }, { status: 404 });
   }
@@ -121,7 +121,7 @@ export async function PATCH(
 
     // Trigger sync so subsequent reads reflect the resolution
     try {
-      syncAll();
+      await syncAll();
     } catch {
       // Sync is best-effort
     }

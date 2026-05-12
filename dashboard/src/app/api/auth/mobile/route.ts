@@ -1,31 +1,26 @@
 import { NextRequest } from 'next/server';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { db } from '@/lib/db';
-import type { User } from '@/lib/types';
-import { checkRateLimit, resetRateLimit } from '@/lib/rate-limit';
+import { supabase } from '@/lib/supabase';
+
+const isVercel = !!process.env.VERCEL;
 
 export const dynamic = 'force-dynamic';
 
-/**
- * POST /api/auth/mobile - Mobile-friendly auth that returns JWT in response body
- *
- * Body: { username: string, password: string }
- * Returns: { token: string, user: { id: string, name: string } }
- */
 export async function POST(request: NextRequest) {
-  // Security (H8): Only trust x-forwarded-for when behind a known proxy.
-  // Without TRUST_PROXY=true, x-forwarded-for is trivially spoofable.
   const trustProxy = process.env.TRUST_PROXY === 'true';
   const ip = trustProxy
     ? (request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown')
     : (request.headers.get('x-real-ip') ?? 'unknown');
-  const { allowed, retryAfter } = checkRateLimit(ip);
-  if (!allowed) {
-    return Response.json({ error: 'Too many attempts' }, { status: 429, headers: { 'Retry-After': String(retryAfter) } } as any);
-  }
 
-  // Security (H8/H13): No hardcoded JWT secret fallback.
+  try {
+    const { checkRateLimit } = await import('@/lib/rate-limit');
+    const { allowed, retryAfter } = await checkRateLimit(ip);
+    if (!allowed) {
+      return Response.json({ error: 'Too many attempts' }, { status: 429, headers: { 'Retry-After': String(retryAfter) } } as any);
+    }
+  } catch { /* rate limit check is best effort */ }
+
   const JWT_SECRET = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
   if (!JWT_SECRET) {
     return Response.json({ error: 'Server configuration error' }, { status: 500 });
@@ -45,13 +40,24 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const user = db
-      .prepare('SELECT * FROM users WHERE username = ?')
-      .get(username) as User | undefined;
+    // Vercel env-var fallback when no Supabase configured
+    if (isVercel && !process.env.SUPABASE_URL) {
+      const envUser = process.env.ADMIN_USERNAME ?? 'admin';
+      const envPass = process.env.ADMIN_PASSWORD;
+      if (!envPass || username !== envUser || password !== envPass) {
+        return Response.json({ error: 'Invalid credentials' }, { status: 401 });
+      }
+      const token = jwt.sign({ sub: '1', name: envUser }, JWT_SECRET, { expiresIn: '30d' });
+      return Response.json({ token, user: { id: '1', name: envUser } });
+    }
 
-    if (!user) {
-      // Constant-time defense: run a dummy bcrypt comparison so the response time
-      // doesn't reveal whether the user exists.
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('username', username)
+      .maybeSingle();
+
+    if (error || !user) {
       await bcrypt.compare(password, '$2a$12$00000000000000000000000000000000000000000000000000000');
       return Response.json({ error: 'Invalid credentials' }, { status: 401 });
     }
@@ -61,10 +67,11 @@ export async function POST(request: NextRequest) {
       return Response.json({ error: 'Invalid credentials' }, { status: 401 });
     }
 
-    // Auth successful — reset rate limit counter
-    resetRateLimit(ip);
+    try {
+      const { resetRateLimit } = await import('@/lib/rate-limit');
+      await resetRateLimit(ip);
+    } catch { /* best effort */ }
 
-    // Generate JWT
     const token = jwt.sign(
       { sub: String(user.id), name: user.username },
       JWT_SECRET,

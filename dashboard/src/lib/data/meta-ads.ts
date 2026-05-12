@@ -74,6 +74,12 @@ export interface MetaAdRow {
 
 export type DateRangePreset = 'today' | 'yesterday' | 'last_7d' | 'last_14d' | 'last_30d';
 
+export interface MetaDailyPoint {
+  date: string;
+  spend: number;
+  costPerResult: number;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -428,6 +434,27 @@ export async function getAds(
       metrics: buildMetrics(currentInsights, previousInsights),
     };
   });
+}
+
+const TRENDS_FIELDS = 'spend,actions,date_start';
+
+export async function getCampaignTrends(
+  campaignId: string,
+  dateRange: DateRangePreset = 'last_7d',
+): Promise<MetaDailyPoint[]> {
+  const range = getDateRange(dateRange);
+  const data = await metaFetchAll<Record<string, unknown>>(`/${campaignId}/insights`, {
+    time_increment: '1',
+    time_range: JSON.stringify(range),
+    fields: TRENDS_FIELDS,
+    limit: '200',
+  });
+
+  return data.map(row => ({
+    date: row.date_start as string,
+    spend: parseNumber(row.spend),
+    costPerResult: extractCostPerResult(row),
+  }));
 }
 
 /** Fetch account-level summary metrics for the summary cards */

@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>SaijeIQ — Brand Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<style>
+  :root {
+    --ink: #0B1A33;
+    --paper: #F2F4F9;
+    --white: #FFFFFF;
+    --blue: #3B82F6;
+    --line: rgba(11, 26, 51, 0.08);
+    --muted: #5A6478;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--paper); color: var(--ink);
+    font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  .page { max-width: 1180px; margin: 0 auto; padding: 80px 64px 120px; }
+  header { display: flex; align-items: flex-end; justify-content: space-between;
+    padding-bottom: 24px; border-bottom: 1px solid var(--line); margin-bottom: 64px; }
+  header .meta { font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  h1 { font-weight: 300; font-size: 56px; letter-spacing: -1.4px; margin: 0; }
+  h1 .ai { font-weight: 900; color: var(--blue); }
+  h1 .iq { font-weight: 600; font-size: 26px; color: var(--blue);
+    vertical-align: super; margin-left: 2px; }
+  h2 { font-weight: 600; font-size: 13px; letter-spacing: 0.12em;
+    text-transform: uppercase; margin: 0 0 24px; color: var(--muted); }
+  h3 { font-weight: 600; font-size: 22px; margin: 0 0 8px; letter-spacing: -0.4px; }
+  p  { font-weight: 400; font-size: 15px; line-height: 1.55; color: var(--muted); margin: 0; }
+  section { margin-bottom: 72px; }
+
+  .hero { background: var(--ink); border-radius: 16px; padding: 96px 64px;
+    display: flex; align-items: center; justify-content: center; }
+  .hero img { width: 460px; height: auto; }
+
+  .surfaces { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .surface { border-radius: 12px; padding: 56px 40px; display: flex;
+    align-items: center; justify-content: flex-start; min-height: 180px; }
+  .surface.dark { background: var(--ink); }
+  .surface.light { background: var(--white); border: 1px solid var(--line); }
+  .surface img { width: 280px; height: auto; }
+  .surface .label { font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.1em; }
+
+  .marks { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .mark { background: var(--white); border: 1px solid var(--line); border-radius: 12px;
+    padding: 28px; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 16px; min-height: 180px; }
+  .mark.dark { background: var(--ink); border-color: transparent; color: var(--white); }
+  .mark img { width: 72px; height: 72px; }
+  .mark .cap { font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.7; }
+
+  .colors { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .swatch { border-radius: 12px; overflow: hidden; border: 1px solid var(--line); }
+  .swatch .chip { height: 140px; }
+  .swatch .info { padding: 16px 18px; background: var(--white); }
+  .swatch .name { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+  .swatch .hex  { font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--muted); }
+
+  .type-row { display: grid; grid-template-columns: 200px 1fr; gap: 32px;
+    padding: 24px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
+  .type-row:last-child { border-bottom: 0; }
+  .type-row .key { font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+  .type-spec { font-size: 56px; letter-spacing: -1.4px; line-height: 1; }
+  .type-spec .ai { font-weight: 900; color: var(--blue); }
+  .type-spec .iq { font-weight: 600; font-size: 26px; color: var(--blue);
+    vertical-align: super; margin-left: 2px; }
+  .type-spec .base { font-weight: 300; }
+
+  .files { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .file { background: var(--white); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .file a { color: var(--blue); text-decoration: none; font-weight: 500; }
+  .file a:hover { text-decoration: underline; }
+  .file .desc { color: var(--muted); }
+
+  .rules { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .rule { background: var(--white); border: 1px solid var(--line); border-radius: 12px;
+    padding: 28px; }
+  .rule .tag { font-family: 'JetBrains Mono', monospace; font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.12em; padding: 4px 8px;
+    border-radius: 4px; display: inline-block; margin-bottom: 12px; }
+  .rule.do .tag { background: #DEF2E5; color: #1B7A3E; }
+  .rule.dont .tag { background: #FBE2E0; color: #B43A2C; }
+
+  .construction { background: var(--white); border: 1px solid var(--line);
+    border-radius: 12px; padding: 56px; display: flex; justify-content: center;
+    align-items: center; gap: 64px; }
+  .construction .grid-img { position: relative; }
+  .construction .grid-img img { width: 240px; height: 240px; display: block; }
+  .construction .grid-img .overlay { position: absolute; inset: 0; pointer-events: none;
+    background-image:
+      linear-gradient(to right, rgba(59,130,246,0.18) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(59,130,246,0.18) 1px, transparent 1px);
+    background-size: 30px 30px;
+  }
+  .construction .specs { font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--muted); line-height: 1.9; }
+  .construction .specs b { color: var(--ink); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <h1><span>S</span><span class="ai">ai</span><span>je</span><span class="iq">IQ</span></h1>
+    <div class="meta">Brand Guide · v1.0 · Concept 01 — Neural Node</div>
+  </header>
+
+  <section>
+    <div class="hero">
+      <img src="saijeiq-logo-onDark.svg" alt="SaijeIQ" />
+    </div>
+  </section>
+
+  <section>
+    <h2>Primary lockup</h2>
+    <div class="surfaces">
+      <div class="surface dark"><img src="saijeiq-logo-onDark.svg" alt="On dark"/></div>
+      <div class="surface light"><img src="saijeiq-logo-onLight.svg" alt="On light"/></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Mark</h2>
+    <div class="marks">
+      <div class="mark dark"><img src="saijeiq-mark.svg" alt=""/><div class="cap">On dark · color</div></div>
+      <div class="mark"><img src="saijeiq-mark-onlight.svg" alt=""/><div class="cap">On light · color</div></div>
+      <div class="mark dark"><img src="saijeiq-mark-mono.svg" alt="" style="color:#FFFFFF"/><div class="cap">Mono · white</div></div>
+      <div class="mark"><img src="saijeiq-mark-mono.svg" alt="" style="color:#0B1A33"/><div class="cap">Mono · ink</div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Construction</h2>
+    <div class="construction">
+      <div class="grid-img">
+        <img src="saijeiq-mark.svg" alt="" style="background:#0B1A33; border-radius:8px; padding:24px;"/>
+        <div class="overlay"></div>
+      </div>
+      <div class="specs">
+        <div><b>Grid</b> · 8×8 unit</div>
+        <div><b>Outer nodes</b> · r 2.6u, fill foreground</div>
+        <div><b>Center node</b> · r 3.2u, fill Signal Blue</div>
+        <div><b>Threads</b> · 1.1u stroke, round caps</div>
+        <div><b>Bounding box</b> · 48×48u</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Color</h2>
+    <div class="colors">
+      <div class="swatch"><div class="chip" style="background:#0B1A33"></div>
+        <div class="info"><div class="name">Ink</div><div class="hex">#0B1A33</div></div></div>
+      <div class="swatch"><div class="chip" style="background:#3B82F6"></div>
+        <div class="info"><div class="name">Signal Blue</div><div class="hex">#3B82F6</div></div></div>
+      <div class="swatch"><div class="chip" style="background:#F2F4F9; border-bottom:1px solid var(--line)"></div>
+        <div class="info"><div class="name">Paper</div><div class="hex">#F2F4F9</div></div></div>
+      <div class="swatch"><div class="chip" style="background:#FFFFFF; border-bottom:1px solid var(--line)"></div>
+        <div class="info"><div class="name">White</div><div class="hex">#FFFFFF</div></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Typography</h2>
+    <div class="type-row">
+      <div class="key">Family</div>
+      <div><h3 style="font-weight:500">Inter</h3><p>Google Fonts · 300, 600, 900</p></div>
+    </div>
+    <div class="type-row">
+      <div class="key">Wordmark</div>
+      <div class="type-spec"><span class="base">S</span><span class="ai">ai</span><span class="base">je</span><span class="iq">IQ</span></div>
+    </div>
+    <div class="type-row">
+      <div class="key">"S", "je"</div>
+      <div><p><b style="color:var(--ink)">Inter 300</b> · letter-spacing −0.025em</p></div>
+    </div>
+    <div class="type-row">
+      <div class="key">"ai"</div>
+      <div><p><b style="color:var(--ink)">Inter 900 · Signal Blue</b> · the load-bearing emphasis</p></div>
+    </div>
+    <div class="type-row">
+      <div class="key">"IQ"</div>
+      <div><p><b style="color:var(--ink)">Inter 600 · 46% size · Signal Blue</b> · superscript, raised −22 of cap</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Usage</h2>
+    <div class="rules">
+      <div class="rule do"><span class="tag">Do</span>
+        <h3>Preserve clear space</h3>
+        <p>Minimum margin around the lockup equals the height of the "S" cap (~0.7× the icon).</p></div>
+      <div class="rule dont"><span class="tag">Don't</span>
+        <h3>Don't recolor ai or IQ</h3>
+        <p>Signal Blue is non-negotiable on those characters. The blue is the brand.</p></div>
+      <div class="rule do"><span class="tag">Do</span>
+        <h3>Use on solid grounds</h3>
+        <p>Ink, Paper, or a quiet photograph. Maintain WCAG AA contrast.</p></div>
+      <div class="rule dont"><span class="tag">Don't</span>
+        <h3>Don't split the wordmark</h3>
+        <p>SaijeIQ reads as one word. Never break it across lines or insert space.</p></div>
+      <div class="rule do"><span class="tag">Do</span>
+        <h3>Outline before export</h3>
+        <p>Convert text to paths in Figma/Illustrator for final asset delivery.</p></div>
+      <div class="rule dont"><span class="tag">Don't</span>
+        <h3>No effects</h3>
+        <p>No gradients, glows, drop shadows, bevels, or outer strokes on the wordmark.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Files</h2>
+    <div class="files">
+      <div class="file"><a href="saijeiq-logo-onDark.svg" download>saijeiq-logo-onDark.svg</a><span class="desc">Primary · dark</span></div>
+      <div class="file"><a href="saijeiq-logo-onLight.svg" download>saijeiq-logo-onLight.svg</a><span class="desc">Primary · light</span></div>
+      <div class="file"><a href="saijeiq-logo-mono-white.svg" download>saijeiq-logo-mono-white.svg</a><span class="desc">Mono · white</span></div>
+      <div class="file"><a href="saijeiq-logo-mono-black.svg" download>saijeiq-logo-mono-black.svg</a><span class="desc">Mono · ink</span></div>
+      <div class="file"><a href="saijeiq-mark.svg" download>saijeiq-mark.svg</a><span class="desc">Icon · color · on dark</span></div>
+      <div class="file"><a href="saijeiq-mark-onlight.svg" download>saijeiq-mark-onlight.svg</a><span class="desc">Icon · color · on light</span></div>
+      <div class="file"><a href="saijeiq-mark-mono.svg" download>saijeiq-mark-mono.svg</a><span class="desc">Icon · currentColor</span></div>
+      <div class="file"><a href="favicon.svg" download>favicon.svg</a><span class="desc">Favicon · 48×48</span></div>
+      <div class="file"><a href="README.md" download>README.md</a><span class="desc">Handoff notes</span></div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

@@ -1,40 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import {
-  IconMessage,
-  IconCheckbox,
-  IconShield,
-  IconAlertTriangle,
-  IconFlag,
-  IconActivity,
-  IconPlayerPause,
-  IconPlayerPlay,
-} from '@tabler/icons-react';
 import { formatDistanceToNow } from 'date-fns';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useSSE } from '@/hooks/use-sse';
 import type { Event, SSEEvent } from '@/lib/types';
-
-interface LiveActivityProps {
-  initialEvents: Event[];
-}
-
-const eventTypeIcons: Record<string, React.ReactNode> = {
-  message: <IconMessage size={14} />,
-  task: <IconCheckbox size={14} />,
-  approval: <IconShield size={14} />,
-  error: <IconAlertTriangle size={14} className="text-destructive" />,
-  milestone: <IconFlag size={14} className="text-primary" />,
-};
-
-function formatEventTime(timestamp: string): string {
-  try {
-    return formatDistanceToNow(new Date(timestamp), { addSuffix: true });
-  } catch {
-    return 'unknown';
-  }
-}
 
 interface DisplayEvent {
   id: string;
@@ -64,110 +33,123 @@ function eventToDisplayEvent(event: Event): DisplayEvent {
   };
 }
 
+function formatTime(ts: string): string {
+  try {
+    const d = new Date(ts);
+    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  } catch { return '--:--:--'; }
+}
+
+const AGENT_COLORS: Record<string, string> = {
+  sage:    '#3B82F6',
+  dev:     '#2dd4bf',
+  analyst: '#f59e0b',
+  ana:     '#f59e0b',
+};
+
+function agentColor(name: string): string {
+  const lower = name.toLowerCase();
+  for (const [key, color] of Object.entries(AGENT_COLORS)) {
+    if (lower.includes(key)) return color;
+  }
+  return '#6b7494';
+}
+
+interface LiveActivityProps {
+  initialEvents: Event[];
+}
+
 export function LiveActivity({ initialEvents }: LiveActivityProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [paused, setPaused] = useState(false);
+  const [newIds, setNewIds] = useState<Set<string>>(new Set());
   const [liveEvents, setLiveEvents] = useState<DisplayEvent[]>([]);
 
-  const { events: sseEvents, isConnected } = useSSE({
-    bufferSize: 20,
-  });
+  const { events: sseEvents, isConnected } = useSSE({ bufferSize: 20 });
 
-  // Convert SSE events to display events
   useEffect(() => {
     if (sseEvents.length > 0) {
-      const newDisplayEvents = sseEvents.map(sseToDisplayEvent);
-      setLiveEvents(newDisplayEvents);
+      const mapped = sseEvents.map(sseToDisplayEvent);
+      setLiveEvents(mapped);
+      const ids = new Set(mapped.slice(0, 3).map(e => e.id));
+      setNewIds(ids);
+      setTimeout(() => setNewIds(new Set()), 1000);
     }
   }, [sseEvents]);
 
-  // Combine initial + live, dedupe by id, limit to 20
-  const allEvents = [
-    ...liveEvents,
-    ...initialEvents.map(eventToDisplayEvent),
-  ];
-  // Dedupe
+  const allEvents = [...liveEvents, ...initialEvents.map(eventToDisplayEvent)];
   const seen = new Set<string>();
-  const dedupedEvents = allEvents.filter((e) => {
-    if (seen.has(e.id)) return false;
-    seen.add(e.id);
-    return true;
-  });
-  // Sort newest first, then take 20
-  const displayEvents = dedupedEvents
+  const displayEvents = allEvents
+    .filter(e => { if (seen.has(e.id)) return false; seen.add(e.id); return true; })
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-    .slice(0, 20);
-
-  // Auto-scroll when new events arrive
-  useEffect(() => {
-    if (!paused && scrollRef.current) {
-      scrollRef.current.scrollTop = 0;
-    }
-  }, [displayEvents.length, paused]);
+    .slice(0, 18);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium uppercase tracking-wider text-muted-foreground">
-              Live Activity
-            </span>
-            <span
-              className={`inline-block h-2 w-2 rounded-full ${
-                isConnected ? 'bg-success animate-pulse' : 'bg-warning'
-              }`}
-              title={isConnected ? 'Connected' : 'Reconnecting...'}
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => setPaused(!paused)}
-            className="rounded-md p-1 hover:bg-muted transition-colors"
-            title={paused ? 'Resume auto-scroll' : 'Pause auto-scroll'}
-          >
-            {paused ? (
-              <IconPlayerPlay size={16} className="text-muted-foreground" />
-            ) : (
-              <IconPlayerPause size={16} className="text-muted-foreground" />
-            )}
-          </button>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div
-          ref={scrollRef}
-          className="max-h-[300px] overflow-y-auto space-y-0.5"
-        >
-          {displayEvents.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">
-              Your agents are starting up. Activity will appear here as they begin working.
-            </p>
-          ) : (
-            displayEvents.map((event) => (
+    <div className="glass-card flex flex-col" style={{ padding: '18px 20px', minHeight: 360 }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span
+            className="animate-live-pulse"
+            style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 6px #22c55e', display: 'inline-block', flexShrink: 0 }}
+          />
+          <span style={{ fontSize: 13, fontWeight: 500, color: '#e8eaf2' }}>Live Activity Feed</span>
+        </div>
+        <span style={{ fontSize: 11, color: '#4a5170', fontFamily: 'var(--font-jetbrains), monospace' }}>
+          Last 24h ·{' '}
+          <span style={{ color: isConnected ? '#2dd4bf' : '#f59e0b' }}>
+            {isConnected ? 'streaming' : 'reconnecting'}
+          </span>
+        </span>
+      </div>
+
+      {/* Feed */}
+      <div ref={scrollRef} style={{ flex: 1, maxHeight: 360, overflowY: 'auto' }}>
+        {displayEvents.length === 0 ? (
+          <p style={{ fontSize: 12, color: '#4a5170', textAlign: 'center', padding: '24px 0' }}>
+            Agents are starting up. Activity will appear here.
+          </p>
+        ) : (
+          displayEvents.map(event => {
+            const color = agentColor(event.agent);
+            const isNew = newIds.has(event.id);
+            return (
               <div
                 key={event.id}
-                className="flex items-start gap-2 rounded px-2 py-1.5 hover:bg-muted/50 text-sm"
+                className={isNew ? 'animate-slide-up' : ''}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '70px 90px 1fr',
+                  alignItems: 'flex-start',
+                  padding: '11px 0',
+                  borderBottom: '1px solid rgba(255,255,255,0.04)',
+                  cursor: 'default',
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.02)'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
               >
-                <span className="mt-0.5 shrink-0 text-muted-foreground">
-                  {eventTypeIcons[event.type] ?? (
-                    <IconActivity size={14} />
-                  )}
+                <span style={{ fontFamily: 'var(--font-jetbrains), monospace', fontSize: 10.5, color: '#4a5170', paddingTop: 1 }}>
+                  {formatTime(event.timestamp)}
                 </span>
-                {event.agent && (
-                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-xs font-medium">
-                    {event.agent}
-                  </span>
-                )}
-                <span className="truncate flex-1">{event.message}</span>
-                <span className="shrink-0 text-xs text-muted-foreground" suppressHydrationWarning>
-                  {formatEventTime(event.timestamp)}
+                <span style={{
+                  fontFamily: 'var(--font-jetbrains), monospace', fontSize: 10,
+                  color, background: `${color}18`, border: `1px solid ${color}33`,
+                  borderRadius: 4, padding: '1px 6px', alignSelf: 'flex-start',
+                  display: 'inline-block', maxWidth: 80, overflow: 'hidden',
+                  textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {event.agent || '—'}
+                </span>
+                <span style={{
+                  fontFamily: 'var(--font-jetbrains), monospace', fontSize: 11.5,
+                  color: '#6b7494', lineHeight: 1.5, paddingLeft: 8,
+                }}>
+                  {event.message}
                 </span>
               </div>
-            ))
-          )}
-        </div>
-      </CardContent>
-    </Card>
+            );
+          })
+        )}
+      </div>
+    </div>
   );
 }

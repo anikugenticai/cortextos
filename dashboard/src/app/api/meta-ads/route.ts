@@ -5,6 +5,7 @@ import {
   getAdSets,
   getAds,
   getAccountSummary,
+  getCampaignTrends,
   type DateRangePreset,
 } from '@/lib/data/meta-ads';
 
@@ -70,6 +71,15 @@ export async function GET(request: NextRequest) {
         }
         const ads = await getAds(adsetId, dateRange);
         return Response.json({ ads });
+      }
+
+      case 'trends': {
+        const campaignId = searchParams.get('campaignId');
+        if (!campaignId) {
+          return Response.json({ error: 'campaignId required' }, { status: 400 });
+        }
+        const trends = await getCampaignTrends(campaignId, dateRange);
+        return Response.json({ trends });
       }
 
       default:

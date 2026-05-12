@@ -26,17 +26,17 @@ export default async function AnalyticsPage({
   const org = orgParam && orgs.includes(orgParam) ? orgParam : '';
 
   // Sync cost data lazily (only on this page, throttled)
-  syncCostsLazy();
+  await syncCostsLazy();
 
   // Fetch all data in parallel
   const [taskData, agentStats, dailyCosts, dailyCostByModel, monthCost, goalsData, fleetHealth, planUsage, usageHistory] =
     await Promise.all([
-      Promise.resolve(getTaskThroughput(30, org || undefined)),
-      Promise.resolve(getAgentEffectiveness(org || undefined)),
-      Promise.resolve(getDailyCosts(30)),
-      Promise.resolve(getDailyCostByModel(30)),
-      Promise.resolve(getCurrentMonthCost()),
-      Promise.resolve(org ? getGoals(org) : { bottleneck: '', goals: [] }),
+      getTaskThroughput(30, org || undefined),
+      getAgentEffectiveness(org || undefined),
+      getDailyCosts(30),
+      getDailyCostByModel(30),
+      getCurrentMonthCost(),
+      org ? getGoals(org) : Promise.resolve({ bottleneck: '', goals: [] }),
       Promise.resolve(getFleetHealth(org || 'default')),
       Promise.resolve(getPlanUsage()),
       Promise.resolve(getUsageHistory(7)),

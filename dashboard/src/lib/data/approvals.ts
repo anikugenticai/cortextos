@@ -1,137 +1,85 @@
-// cortextOS Dashboard - Approval data fetcher
-// Reads from SQLite (synced from JSON approval files on disk).
-
-import { db } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
 import type { Approval } from '@/lib/types';
 
-/**
- * Get pending approvals, newest first.
- */
-export function getPendingApprovals(org?: string): Approval[] {
+export async function getPendingApprovals(org?: string): Promise<Approval[]> {
   return getApprovalsByStatus('pending', org);
 }
 
-/**
- * Get resolved approvals with optional filters.
- */
-export function getResolvedApprovals(
+export async function getResolvedApprovals(
   org?: string,
-  filters?: { agent?: string; category?: string; dateRange?: [Date, Date] }
-): Approval[] {
-  const conditions: string[] = ["status != 'pending'"];
-  const params: (string | number)[] = [];
-
-  if (org) {
-    conditions.push('org = ?');
-    params.push(org);
-  }
-  if (filters?.agent) {
-    conditions.push('agent = ?');
-    params.push(filters.agent);
-  }
-  if (filters?.category) {
-    conditions.push('category = ?');
-    params.push(filters.category);
-  }
-  if (filters?.dateRange) {
-    conditions.push('resolved_at >= ? AND resolved_at <= ?');
-    params.push(
-      filters.dateRange[0].toISOString(),
-      filters.dateRange[1].toISOString()
-    );
-  }
-
-  const where = `WHERE ${conditions.join(' AND ')}`;
-
+  filters?: { agent?: string; category?: string; dateRange?: [Date, Date] },
+): Promise<Approval[]> {
   try {
-    const rows = db
-      .prepare(
-        `SELECT id, title, category, description, status, agent, org,
-                created_at, resolved_at, resolved_by, resolution_note, source_file
-         FROM approvals ${where}
-         ORDER BY resolved_at DESC`
-      )
-      .all(...params) as Record<string, unknown>[];
+    let query = supabase
+      .from('approvals')
+      .select('*')
+      .neq('status', 'pending')
+      .order('resolved_at', { ascending: false });
 
-    return rows.map(rowToApproval);
+    if (org) query = query.eq('org', org);
+    if (filters?.agent) query = query.eq('agent', filters.agent);
+    if (filters?.category) query = query.eq('category', filters.category);
+    if (filters?.dateRange) {
+      query = query
+        .gte('resolved_at', filters.dateRange[0].toISOString())
+        .lte('resolved_at', filters.dateRange[1].toISOString());
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []).map(rowToApproval);
   } catch (err) {
     console.error('[data/approvals] getResolvedApprovals error:', err);
     return [];
   }
 }
 
-/**
- * Get count of pending approvals (for sidebar badge).
- */
-export function getPendingCount(org?: string): number {
-  const conditions: string[] = ["status = 'pending'"];
-  const params: (string | number)[] = [];
-
-  if (org) {
-    conditions.push('org = ?');
-    params.push(org);
-  }
-
-  const where = `WHERE ${conditions.join(' AND ')}`;
-
+export async function getPendingCount(org?: string): Promise<number> {
   try {
-    const row = db
-      .prepare(`SELECT COUNT(*) as count FROM approvals ${where}`)
-      .get(...params) as { count: number } | undefined;
+    let query = supabase
+      .from('approvals')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'pending');
 
-    return row?.count ?? 0;
+    if (org) query = query.eq('org', org);
+
+    const { count, error } = await query;
+    if (error) throw error;
+    return count ?? 0;
   } catch (err) {
     console.error('[data/approvals] getPendingCount error:', err);
     return 0;
   }
 }
 
-/**
- * Get a single approval by ID.
- */
-export function getApprovalById(id: string): Approval | null {
+export async function getApprovalById(id: string): Promise<Approval | null> {
   try {
-    const row = db
-      .prepare(
-        `SELECT id, title, category, description, status, agent, org,
-                created_at, resolved_at, resolved_by, resolution_note, source_file
-         FROM approvals WHERE id = ?`
-      )
-      .get(id) as Record<string, unknown> | undefined;
-
-    return row ? rowToApproval(row) : null;
+    const { data, error } = await supabase
+      .from('approvals')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) throw error;
+    return data ? rowToApproval(data) : null;
   } catch (err) {
     console.error('[data/approvals] getApprovalById error:', err);
     return null;
   }
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-function getApprovalsByStatus(status: string, org?: string): Approval[] {
-  const conditions: string[] = ['status = ?'];
-  const params: (string | number)[] = [status];
-
-  if (org) {
-    conditions.push('org = ?');
-    params.push(org);
-  }
-
-  const where = `WHERE ${conditions.join(' AND ')}`;
-
+async function getApprovalsByStatus(status: string, org?: string): Promise<Approval[]> {
   try {
-    const rows = db
-      .prepare(
-        `SELECT id, title, category, description, status, agent, org,
-                created_at, resolved_at, resolved_by, resolution_note, source_file
-         FROM approvals ${where}
-         ORDER BY created_at DESC`
-      )
-      .all(...params) as Record<string, unknown>[];
+    let query = supabase
+      .from('approvals')
+      .select('*')
+      .eq('status', status)
+      .order('created_at', { ascending: false });
 
-    return rows.map(rowToApproval);
+    if (org) query = query.eq('org', org);
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []).map(rowToApproval);
   } catch (err) {
     console.error('[data/approvals] getApprovalsByStatus error:', err);
     return [];

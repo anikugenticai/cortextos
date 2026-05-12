@@ -5,7 +5,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { db } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
 import { CTX_ROOT, getAgentsForOrg, getAllAgents, getOrgs } from '@/lib/config';
 import type { CostEntry } from '@/lib/types';
 
@@ -281,36 +281,34 @@ export function scanCodexLogsCosts(): CostEntry[] {
 }
 
 // ---------------------------------------------------------------------------
-// SQLite persistence
+// Supabase persistence
 // ---------------------------------------------------------------------------
 
-const INSERT_COST = db.prepare(`
-  INSERT OR IGNORE INTO cost_entries (timestamp, agent, org, model, input_tokens, output_tokens, total_tokens, cost_usd, source_file)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-`);
-
-/**
- * Persist cost entries to SQLite. Skips duplicates via INSERT OR IGNORE.
- */
-export function persistCostEntries(entries: CostEntry[]): number {
+export async function persistCostEntries(entries: CostEntry[]): Promise<number> {
   let inserted = 0;
-  const insertMany = db.transaction((items: CostEntry[]) => {
-    for (const e of items) {
-      const result = INSERT_COST.run(
-        e.timestamp,
-        e.agent,
-        e.org,
-        e.model,
-        e.input_tokens,
-        e.output_tokens,
-        e.total_tokens,
-        e.cost_usd,
-        e.source_file ?? null,
-      );
-      if (result.changes > 0) inserted++;
+  for (let i = 0; i < entries.length; i += 500) {
+    const chunk = entries.slice(i, i + 500);
+    const rows = chunk.map((e) => ({
+      timestamp: e.timestamp,
+      agent: e.agent,
+      org: e.org,
+      model: e.model,
+      input_tokens: e.input_tokens,
+      output_tokens: e.output_tokens,
+      total_tokens: e.total_tokens,
+      cost_usd: e.cost_usd,
+      source_file: e.source_file ?? null,
+    }));
+    const { data, error } = await supabase
+      .from('cost_entries')
+      .upsert(rows, { onConflict: 'source_file,timestamp,model,agent', ignoreDuplicates: true })
+      .select('id');
+    if (error) {
+      console.error('[cost-parser] upsert error:', error);
+    } else {
+      inserted += data?.length ?? 0;
     }
-  });
-  insertMany(entries);
+  }
   return inserted;
 }
 
@@ -324,7 +322,7 @@ export function persistCostEntries(entries: CostEntry[]): number {
  * union explicitly so any future overlap (e.g., a codex agent that also gets
  * scanned through claude's projects dir) does not double-count.
  */
-export function syncCosts(): { scanned: number; inserted: number } {
+export async function syncCosts(): Promise<{ scanned: number; inserted: number }> {
   const claudeEntries = scanClaudeProjectsCosts();
   const codexEntries = scanCodexLogsCosts();
 
@@ -337,7 +335,7 @@ export function syncCosts(): { scanned: number; inserted: number } {
     merged.push(entry);
   }
 
-  const inserted = merged.length > 0 ? persistCostEntries(merged) : 0;
+  const inserted = merged.length > 0 ? await persistCostEntries(merged) : 0;
   return { scanned: merged.length, inserted };
 }
 
@@ -345,122 +343,130 @@ export function syncCosts(): { scanned: number; inserted: number } {
 // Query helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Get cost entries from the DB, newest first.
- */
-export function getCostEntries(
+export async function getCostEntries(
   limit: number = 100,
   org?: string,
-): CostEntry[] {
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
-
-  if (org) {
-    conditions.push('org = ?');
-    params.push(org);
-  }
-
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
+): Promise<CostEntry[]> {
   try {
-    return db
-      .prepare(
-        `SELECT id, timestamp, agent, org, model, input_tokens, output_tokens, total_tokens, cost_usd, source_file
-         FROM cost_entries ${where}
-         ORDER BY timestamp DESC
-         LIMIT ?`,
-      )
-      .all(...params, limit) as CostEntry[];
+    let query = supabase
+      .from('cost_entries')
+      .select('*')
+      .order('timestamp', { ascending: false })
+      .limit(limit);
+
+    if (org) query = query.eq('org', org);
+
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data ?? []) as CostEntry[];
   } catch {
     return [];
   }
 }
 
-/**
- * Get daily cost totals for the last N days.
- */
-export function getDailyCosts(days: number = 30): Array<{ date: string; cost: number }> {
+export async function getDailyCosts(days: number = 30): Promise<Array<{ date: string; cost: number }>> {
   try {
-    const rows = db
-      .prepare(
-        `SELECT DATE(timestamp) as date, SUM(cost_usd) as cost
-         FROM cost_entries
-         WHERE timestamp >= DATE('now', ?)
-         GROUP BY DATE(timestamp)
-         ORDER BY date ASC`,
-      )
-      .all(`-${days} days`) as Array<{ date: string; cost: number }>;
-    return rows;
-  } catch {
-    return [];
-  }
-}
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const sinceISO = since.toISOString();
 
-/**
- * Get cost totals grouped by model.
- */
-export function getCostByModel(): Array<{ model: string; cost: number; tokens: number }> {
-  try {
-    return db
-      .prepare(
-        `SELECT model, SUM(cost_usd) as cost, SUM(total_tokens) as tokens
-         FROM cost_entries
-         GROUP BY model
-         ORDER BY cost DESC`,
-      )
-      .all() as Array<{ model: string; cost: number; tokens: number }>;
-  } catch {
-    return [];
-  }
-}
+    const { data, error } = await supabase
+      .from('cost_entries')
+      .select('timestamp, cost_usd')
+      .gte('timestamp', sinceISO);
 
-/**
- * Get daily cost breakdown by model for stacked bar chart.
- */
-export function getDailyCostByModel(
-  days: number = 30,
-): Array<Record<string, unknown>> {
-  try {
-    const rows = db
-      .prepare(
-        `SELECT DATE(timestamp) as date, model, SUM(cost_usd) as cost
-         FROM cost_entries
-         WHERE timestamp >= DATE('now', ?)
-         GROUP BY DATE(timestamp), model
-         ORDER BY date ASC`,
-      )
-      .all(`-${days} days`) as Array<{ date: string; model: string; cost: number }>;
+    if (error) throw error;
 
-    // Pivot: group by date, model names as keys
-    const dateMap = new Map<string, Record<string, unknown>>();
-    for (const row of rows) {
-      if (!dateMap.has(row.date)) {
-        dateMap.set(row.date, { date: row.date });
-      }
-      const entry = dateMap.get(row.date)!;
-      const key = resolvePricingKey(row.model);
-      entry[key] = ((entry[key] as number) ?? 0) + row.cost;
+    const dateMap = new Map<string, number>();
+    for (const row of data ?? []) {
+      const date = (row.timestamp as string).substring(0, 10);
+      dateMap.set(date, (dateMap.get(date) ?? 0) + (row.cost_usd as number));
     }
 
-    return Array.from(dateMap.values());
+    return Array.from(dateMap.entries())
+      .map(([date, cost]) => ({ date, cost }))
+      .sort((a, b) => a.date.localeCompare(b.date));
   } catch {
     return [];
   }
 }
 
-/**
- * Get total cost for the current month, useful for projections.
- */
-export function getCurrentMonthCost(): number {
+export async function getCostByModel(): Promise<Array<{ model: string; cost: number; tokens: number }>> {
   try {
-    const row = db
-      .prepare(
-        `SELECT SUM(cost_usd) as total
-         FROM cost_entries
-         WHERE timestamp >= DATE('now', 'start of month')`,
-      )
-      .get() as { total: number | null } | undefined;
-    return row?.total ?? 0;
+    const { data, error } = await supabase
+      .from('cost_entries')
+      .select('model, cost_usd, total_tokens');
+
+    if (error) throw error;
+
+    const modelMap = new Map<string, { cost: number; tokens: number }>();
+    for (const row of data ?? []) {
+      const model = row.model as string;
+      const entry = modelMap.get(model) ?? { cost: 0, tokens: 0 };
+      entry.cost += row.cost_usd as number;
+      entry.tokens += row.total_tokens as number;
+      modelMap.set(model, entry);
+    }
+
+    return Array.from(modelMap.entries())
+      .map(([model, { cost, tokens }]) => ({ model, cost, tokens }))
+      .sort((a, b) => b.cost - a.cost);
+  } catch {
+    return [];
+  }
+}
+
+export async function getDailyCostByModel(
+  days: number = 30,
+): Promise<Array<Record<string, unknown>>> {
+  try {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+    const sinceISO = since.toISOString();
+
+    const { data, error } = await supabase
+      .from('cost_entries')
+      .select('timestamp, model, cost_usd')
+      .gte('timestamp', sinceISO);
+
+    if (error) throw error;
+
+    const dateMap = new Map<string, Record<string, unknown>>();
+    for (const row of data ?? []) {
+      const date = (row.timestamp as string).substring(0, 10);
+      if (!dateMap.has(date)) {
+        dateMap.set(date, { date });
+      }
+      const entry = dateMap.get(date)!;
+      const key = resolvePricingKey(row.model as string);
+      entry[key] = ((entry[key] as number) ?? 0) + (row.cost_usd as number);
+    }
+
+    return Array.from(dateMap.values()).sort((a, b) =>
+      (a.date as string).localeCompare(b.date as string),
+    );
+  } catch {
+    return [];
+  }
+}
+
+export async function getCurrentMonthCost(): Promise<number> {
+  try {
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+
+    const { data, error } = await supabase
+      .from('cost_entries')
+      .select('cost_usd')
+      .gte('timestamp', monthStart);
+
+    if (error) throw error;
+
+    let total = 0;
+    for (const row of data ?? []) {
+      total += row.cost_usd as number;
+    }
+    return total;
   } catch {
     return 0;
   }
