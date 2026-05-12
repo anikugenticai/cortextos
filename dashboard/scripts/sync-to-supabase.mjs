@@ -98,10 +98,8 @@ async function syncEvents(org, agent) {
           agent: ev.agent ?? agent,
           org: ev.org ?? org,
           category: ev.category ?? 'action',
-          event_type: ev.event_type ?? ev.type ?? 'unknown',
-          level: ev.level ?? 'info',
+          type: ev.event_type ?? ev.type ?? 'unknown',
           message: ev.message ?? null,
-          meta: ev.meta ?? null,
         });
       } catch { /* skip malformed */ }
     }
