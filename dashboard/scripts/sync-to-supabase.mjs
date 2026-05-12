@@ -51,7 +51,7 @@ async function upsert(table, rows, conflictCol = 'id') {
 // ---------------------------------------------------------------------------
 
 async function syncTasks(org) {
-  const taskDir = path.join(CTX_ROOT, 'orgs', org, 'tasks', 'active');
+  const taskDir = path.join(CTX_ROOT, 'orgs', org, 'tasks');
   if (!fs.existsSync(taskDir)) return 0;
   const rows = [];
   for (const file of fs.readdirSync(taskDir).filter(f => f.endsWith('.json'))) {
