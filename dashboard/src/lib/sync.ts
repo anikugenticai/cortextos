@@ -53,7 +53,7 @@ export async function syncTasks(org: string): Promise<number> {
   }
 
   const { error } = await supabase.from('tasks').upsert(rows, { onConflict: 'id' });
-  if (error) console.error('[sync] Task upsert error:', error);
+  if (error) console.error('[sync] Task upsert error:', error?.message ?? error);
 
   // Prune rows whose source files no longer exist
   const activePaths = rows.map((r) => r.source_file as string);
@@ -106,7 +106,7 @@ export async function syncApprovals(org: string): Promise<number> {
 
   if (rows.length > 0) {
     const { error } = await supabase.from('approvals').upsert(rows, { onConflict: 'id' });
-    if (error) console.error('[sync] Approval upsert error:', error);
+    if (error) console.error('[sync] Approval upsert error:', error?.message ?? error);
   }
 
   return rows.length;
@@ -162,7 +162,7 @@ export async function syncEvents(org: string, agent: string): Promise<number> {
     for (let i = 0; i < rows.length; i += 500) {
       const chunk = rows.slice(i, i + 500);
       const { error } = await supabase.from('events').upsert(chunk, { onConflict: 'id' });
-      if (error) console.error('[sync] Event upsert error:', error);
+      if (error) console.error('[sync] Event upsert error:', error?.message ?? error);
     }
   }
 
@@ -194,7 +194,7 @@ export async function syncHeartbeat(agent: string): Promise<boolean> {
       },
       { onConflict: 'agent' },
     );
-    if (error) console.error('[sync] Heartbeat upsert error:', error);
+    if (error) console.error('[sync] Heartbeat upsert error:', error?.message ?? error);
     return true;
   } catch (err) {
     console.error(`[sync] Failed to sync heartbeat for ${agent}:`, err);

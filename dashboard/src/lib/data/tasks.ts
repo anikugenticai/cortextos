@@ -27,7 +27,7 @@ export async function getTasks(filters?: TaskFilters): Promise<Task[]> {
     if (error) throw error;
     return (data ?? []).map(rowToTask);
   } catch (err) {
-    console.error('[data/tasks] getTasks error:', err);
+    console.error('[data/tasks] getTasks error:', err instanceof Error ? err.message : err);
     return [];
   }
 }
@@ -42,7 +42,7 @@ export async function getTaskById(id: string): Promise<Task | null> {
     if (error) throw error;
     return data ? rowToTask(data) : null;
   } catch (err) {
-    console.error('[data/tasks] getTaskById error:', err);
+    console.error('[data/tasks] getTaskById error:', err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -73,7 +73,7 @@ export async function getTasksCompletedToday(org?: string): Promise<Task[]> {
     if (error) throw error;
     return (data ?? []).map(rowToTask);
   } catch (err) {
-    console.error('[data/tasks] getTasksCompletedToday error:', err);
+    console.error('[data/tasks] getTasksCompletedToday error:', err instanceof Error ? err.message : err);
     return [];
   }
 }
@@ -95,7 +95,7 @@ export async function getTaskCount(org?: string, status?: string): Promise<numbe
     if (error) throw error;
     return count ?? 0;
   } catch (err) {
-    console.error('[data/tasks] getTaskCount error:', err);
+    console.error('[data/tasks] getTaskCount error:', err instanceof Error ? err.message : err);
     return 0;
   }
 }

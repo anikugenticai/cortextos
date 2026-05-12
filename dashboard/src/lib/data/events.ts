@@ -22,7 +22,7 @@ export async function getRecentEvents(
     if (error) throw error;
     return (data ?? []).map(rowToEvent);
   } catch (err) {
-    console.error('[data/events] getRecentEvents error:', err);
+    console.error('[data/events] getRecentEvents error:', err instanceof Error ? err.message : err);
     return [];
   }
 }
@@ -46,7 +46,7 @@ export async function getEventsToday(org?: string, agent?: string): Promise<Even
     if (error) throw error;
     return (data ?? []).map(rowToEvent);
   } catch (err) {
-    console.error('[data/events] getEventsToday error:', err);
+    console.error('[data/events] getEventsToday error:', err instanceof Error ? err.message : err);
     return [];
   }
 }

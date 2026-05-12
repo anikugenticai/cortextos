@@ -12,11 +12,8 @@ export default async function DashboardLayout({
   const session = await auth();
   if (!session) redirect('/login');
 
-  try {
-    await syncAll();
-  } catch (e) {
-    console.error('Sync failed:', e);
-  }
+  // Fire sync in background — don't block rendering on Supabase roundtrips
+  syncAll().catch((e) => console.error('Sync failed:', e));
 
   const orgs = getOrgs();
 

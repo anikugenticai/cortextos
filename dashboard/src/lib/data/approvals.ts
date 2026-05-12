@@ -29,7 +29,7 @@ export async function getResolvedApprovals(
     if (error) throw error;
     return (data ?? []).map(rowToApproval);
   } catch (err) {
-    console.error('[data/approvals] getResolvedApprovals error:', err);
+    console.error('[data/approvals] getResolvedApprovals error:', err instanceof Error ? err.message : err);
     return [];
   }
 }
@@ -47,7 +47,7 @@ export async function getPendingCount(org?: string): Promise<number> {
     if (error) throw error;
     return count ?? 0;
   } catch (err) {
-    console.error('[data/approvals] getPendingCount error:', err);
+    console.error('[data/approvals] getPendingCount error:', err instanceof Error ? err.message : err);
     return 0;
   }
 }
@@ -62,7 +62,7 @@ export async function getApprovalById(id: string): Promise<Approval | null> {
     if (error) throw error;
     return data ? rowToApproval(data) : null;
   } catch (err) {
-    console.error('[data/approvals] getApprovalById error:', err);
+    console.error('[data/approvals] getApprovalById error:', err instanceof Error ? err.message : err);
     return null;
   }
 }
@@ -81,7 +81,7 @@ async function getApprovalsByStatus(status: string, org?: string): Promise<Appro
     if (error) throw error;
     return (data ?? []).map(rowToApproval);
   } catch (err) {
-    console.error('[data/approvals] getApprovalsByStatus error:', err);
+    console.error('[data/approvals] getApprovalsByStatus error:', err instanceof Error ? err.message : err);
     return [];
   }
 }
