@@ -1,3 +1,4 @@
+import type { Task, GoalsData, HealthSummary, Event, AgentSummary, Heartbeat } from '@/lib/types';
 import { getOrgs } from '@/lib/config';
 import { getPendingCount } from '@/lib/data/approvals';
 import { getTasks, getTasksCompletedToday } from '@/lib/data/tasks';
@@ -34,6 +35,11 @@ export default async function OverviewPage({
   const orgParam = typeof params.org === 'string' ? params.org : undefined;
   const org = orgParam && orgs.includes(orgParam) ? orgParam : '';
 
+  const emptyFallback = () =>
+    [0, [], [], { goals: [], bottleneck: '' }, { healthy: 0, stale: 0, down: 0, agents: [] }, [], [], [], []] as [
+      number, Task[], Task[], GoalsData, HealthSummary, Task[], Event[], AgentSummary[], Heartbeat[],
+    ];
+
   const [
     pendingCount,
     blockedTasks,
@@ -57,8 +63,8 @@ export default async function OverviewPage({
       getAllHeartbeats(),
     ]),
     3000,
-    [0, [], [], { goals: [], bottleneck: '' }, { healthy: 0, stale: 0, down: 0, agents: [] }, [], [], [], []],
-  );
+    emptyFallback(),
+  ).catch(() => emptyFallback());
 
   const heartbeats: Record<string, typeof heartbeatsList[number]> = {};
   for (const hb of heartbeatsList) heartbeats[hb.agent] = hb;
