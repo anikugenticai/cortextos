@@ -17,6 +17,13 @@ import { UpcomingQueue } from '@/components/overview/upcoming-queue';
 
 export const dynamic = 'force-dynamic';
 
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
+}
+
 export default async function OverviewPage({
   searchParams,
 }: {
@@ -37,17 +44,21 @@ export default async function OverviewPage({
     recentEvents,
     agents,
     heartbeatsList,
-  ] = await Promise.all([
-    getPendingCount(org || undefined),
-    getTasks({ status: 'blocked', org: org || undefined }),
-    getTasks({ org: org || undefined }),
-    getGoals(org || 'default'),
-    getHealthSummary(org || undefined),
-    getTasksCompletedToday(org || undefined),
-    getRecentEvents(20, org || undefined),
-    discoverAgents(org || undefined),
-    getAllHeartbeats(),
-  ]);
+  ] = await withTimeout(
+    Promise.all([
+      getPendingCount(org || undefined),
+      getTasks({ status: 'blocked', org: org || undefined }),
+      getTasks({ org: org || undefined }),
+      getGoals(org || 'default'),
+      getHealthSummary(org || undefined),
+      getTasksCompletedToday(org || undefined),
+      getRecentEvents(20, org || undefined),
+      discoverAgents(org || undefined),
+      getAllHeartbeats(),
+    ]),
+    3000,
+    [0, [], [], { goals: [], bottleneck: '' }, { healthy: 0, stale: 0, down: 0, agents: [] }, [], [], [], []],
+  );
 
   const heartbeats: Record<string, typeof heartbeatsList[number]> = {};
   for (const hb of heartbeatsList) heartbeats[hb.agent] = hb;
