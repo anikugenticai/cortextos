@@ -26,6 +26,7 @@ export class AgentProcess {
   private sessionTimer: ReturnType<typeof setTimeout> | null = null;
   private crashCount: number = 0;
   private maxCrashesPerDay: number = 10;
+  private lastCrashAt: number = 0;
   private sessionStart: Date | null = null;
   private status: AgentStatus['status'] = 'stopped';
   private stopping: boolean = false;
@@ -424,6 +425,19 @@ export class AgentProcess {
     this.crashCount++;
     const today = new Date().toISOString().split('T')[0];
     this.resetCrashCountIfNewDay(today);
+
+    // Rapid crash loop: if crashCount >= 2 and previous crash was within 60s,
+    // write .force-fresh so the next restart opens a clean session instead of
+    // resuming the corrupted conversation that caused the loop.
+    const now = Date.now();
+    if (this.crashCount >= 2 && now - this.lastCrashAt < 60_000) {
+      const forceFreshPath = join(this.env.ctxRoot, 'state', this.name, '.force-fresh');
+      try {
+        writeFileSync(forceFreshPath, '', 'utf-8');
+        this.log(`Rapid crash loop detected — wrote .force-fresh (crash #${this.crashCount})`);
+      } catch { /* ignore */ }
+    }
+    this.lastCrashAt = now;
 
     if (this.crashCount >= this.maxCrashesPerDay) {
       this.log(`HALTED: exceeded ${this.maxCrashesPerDay} crashes today`);
