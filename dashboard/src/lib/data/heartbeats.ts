@@ -1,14 +1,38 @@
 // cortextOS Dashboard - Heartbeat data fetcher
-// Reads directly from filesystem (heartbeats change frequently; SQLite may lag).
+// Reads from filesystem when available (local dev), falls back to Supabase (Vercel).
 
 import fs from 'fs/promises';
 import path from 'path';
 import { CTX_ROOT, getHeartbeatPath } from '@/lib/config';
+import { supabase } from '@/lib/supabase';
 import type { Heartbeat, HealthStatus, AgentHealth, HealthSummary } from '@/lib/types';
 
 // Default staleness thresholds (minutes)
 const STALE_THRESHOLD_MIN = 300; // 5 hours
 const DOWN_THRESHOLD_MIN = 1440; // 24 hours
+
+function rowToHeartbeat(row: Record<string, unknown>): Heartbeat {
+  return {
+    agent: row.agent as string,
+    org: (row.org as string) ?? '',
+    status: (row.status as string) ?? 'unknown',
+    current_task: (row.current_task as string) ?? undefined,
+    mode: (row.mode as string) ?? undefined,
+    last_heartbeat: (row.last_heartbeat as string) ?? undefined,
+    loop_interval: (row.loop_interval as number) ?? undefined,
+    uptime_seconds: (row.uptime_seconds as number) ?? undefined,
+  };
+}
+
+async function getAllHeartbeatsFromSupabase(): Promise<Heartbeat[]> {
+  try {
+    const { data, error } = await supabase.from('heartbeats').select('*');
+    if (error || !data) return [];
+    return data.map(rowToHeartbeat);
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Get heartbeat for a single agent. Returns null if not found.
@@ -29,12 +53,23 @@ export async function getHeartbeat(agentName: string): Promise<Heartbeat | null>
       uptime_seconds: data.uptime_seconds ?? undefined,
     };
   } catch {
+    // Filesystem not available (Vercel) — try Supabase
+    try {
+      const { data, error } = await supabase
+        .from('heartbeats')
+        .select('*')
+        .eq('agent', agentName)
+        .maybeSingle();
+      if (!error && data) return rowToHeartbeat(data as Record<string, unknown>);
+    } catch {
+      // ignore
+    }
     return null;
   }
 }
 
 /**
- * Get all heartbeats by scanning the state directory.
+ * Get all heartbeats. Reads from filesystem when available, falls back to Supabase.
  */
 export async function getAllHeartbeats(): Promise<Heartbeat[]> {
   const stateDir = path.join(CTX_ROOT, 'state');
@@ -54,10 +89,11 @@ export async function getAllHeartbeats(): Promise<Heartbeat[]> {
       }
     }
   } catch {
-    // state dir doesn't exist yet - return empty
+    // state dir doesn't exist (Vercel) — fall through to Supabase
   }
 
-  return heartbeats;
+  if (heartbeats.length > 0) return heartbeats;
+  return getAllHeartbeatsFromSupabase();
 }
 
 /**
