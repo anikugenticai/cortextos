@@ -3,6 +3,7 @@ import { spawnSync, execFileSync } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { sendMessage, checkInbox, ackInbox } from '../bus/message.js';
+import { sendSlack } from '../bus/slack.js';
 import { validateAgentName } from '../utils/validate.js';
 import { createTask, updateTask, completeTask, claimTask, readTaskAudit, checkTaskDependencies, compactTasks, listTasks, checkStaleTasks, archiveTasks, checkHumanTasks } from '../bus/task.js';
 import { saveOutput } from '../bus/save-output.js';
@@ -1020,6 +1021,78 @@ busCommand
       console.error(`Failed to send: ${err.message || err}`);
       process.exit(1);
     }
+  });
+
+busCommand
+  .command('send-slack')
+  .description('Send a message to a Slack channel (with safety validation)')
+  .argument('<channel>', 'Slack channel ID (e.g. C01ABC123)')
+  .argument('<message>', 'Message text')
+  .option('--allow-dm', 'Allow sending to DM IDs (starts with D)', false)
+  .action(async (channel: string, message: string, opts: { allowDm?: boolean }) => {
+    message = message.replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+
+    const env = resolveEnv();
+
+    // Resolve Slack token: agent .env first, then process.env
+    let token = '';
+    if (env.agentDir) {
+      const agentEnvPath = join(env.agentDir, '.env');
+      if (existsSync(agentEnvPath)) {
+        const content = readFileSync(agentEnvPath, 'utf-8');
+        const botMatch = content.match(/^SLACK_BOT_TOKEN=(.+)$/m);
+        const userMatch = content.match(/^SLACK_USER_TOKEN=(.+)$/m);
+        token = botMatch?.[1]?.trim() || userMatch?.[1]?.trim() || '';
+      }
+    }
+    if (!token) token = process.env.SLACK_BOT_TOKEN || process.env.SLACK_USER_TOKEN || '';
+
+    if (!token) {
+      console.error('Error: SLACK_BOT_TOKEN (or SLACK_USER_TOKEN) not configured. Set it in your agent .env file.');
+      process.exit(1);
+    }
+
+    // Resolve approved channel list
+    let allowedChannels: string[] = [];
+    let rawAllowed = '';
+    if (env.agentDir) {
+      const agentEnvPath = join(env.agentDir, '.env');
+      if (existsSync(agentEnvPath)) {
+        const content = readFileSync(agentEnvPath, 'utf-8');
+        const m = content.match(/^SLACK_ALLOWED_CHANNELS=(.+)$/m);
+        rawAllowed = m?.[1]?.trim() || '';
+      }
+    }
+    if (!rawAllowed) rawAllowed = process.env.SLACK_ALLOWED_CHANNELS || '';
+    if (rawAllowed) allowedChannels = rawAllowed.split(',').map(s => s.trim()).filter(Boolean);
+
+    const allowDm = opts.allowDm || (process.env.SLACK_ALLOW_DM === '1');
+
+    const result = await sendSlack(channel, message, token, allowedChannels, allowDm);
+
+    for (const w of result.warnings) {
+      console.warn(`Warning: ${w}`);
+    }
+
+    if (!result.ok) {
+      console.error(result.blocked
+        ? `Safety check failed: ${result.error}`
+        : `Slack API error: ${result.error}`
+      );
+      process.exit(1);
+    }
+
+    // Log to event feed
+    if (env.agentName && env.ctxRoot) {
+      try {
+        const paths = resolvePaths(env.agentName, env.instanceId, env.org);
+        const preview = message.length > 120 ? message.slice(0, 120) + '…' : message;
+        logEvent(paths, env.agentName, env.org, 'message', 'slack_sent', 'info',
+          JSON.stringify({ channel, ts: result.ts, preview, warnings: result.warnings.length }));
+      } catch { /* non-fatal */ }
+    }
+
+    console.log('Message sent');
   });
 
 busCommand
