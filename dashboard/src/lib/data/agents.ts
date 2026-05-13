@@ -11,7 +11,7 @@ import {
   getAgentStateDir,
   getAllAgents,
 } from '@/lib/config';
-import { getHeartbeat, getHealthStatus } from '@/lib/data/heartbeats';
+import { getAllHeartbeats, getHeartbeat, getHealthStatus } from '@/lib/data/heartbeats';
 import { getTasksByAgent } from '@/lib/data/tasks';
 import { parseIdentityMd } from '@/lib/markdown-parser';
 import type {
@@ -123,25 +123,39 @@ export async function getAgentIdentity(
 /**
  * Discover all agents, enriched with heartbeat data.
  * If org is provided, filters to that org only.
+ * Falls back to building agents from Supabase heartbeats when the filesystem
+ * agent directories aren't available (e.g. on Vercel).
  */
 export async function discoverAgents(org?: string): Promise<AgentSummary[]> {
+  // Fetch all heartbeats in one batch — avoids N individual Supabase calls
+  // and provides the fallback agent list when the filesystem is unavailable.
+  const allHeartbeats = await getAllHeartbeats();
+  const hbMap = new Map(allHeartbeats.map((hb) => [hb.agent, hb]));
+
   const allAgents = getAllAgents();
-  const agents = org ? allAgents.filter((a) => a.org === org) : allAgents;
+  let agentList = org ? allAgents.filter((a) => a.org === org) : allAgents;
+
+  // When no agents are found on the filesystem (Vercel), build the list from
+  // heartbeat rows so the Agent Fleet orb still renders real data.
+  if (agentList.length === 0 && allHeartbeats.length > 0) {
+    agentList = allHeartbeats
+      .filter((hb) => !org || hb.org === org || !hb.org)
+      .map((hb) => ({ name: hb.agent, org: hb.org ?? '' }));
+  }
 
   const summaries = await Promise.all(
-    agents.map(async (agent) => {
-      const [identity, hb, runtime] = await Promise.all([
+    agentList.map(async (agent) => {
+      const [identity, runtime] = await Promise.all([
         getAgentIdentity(agent.name, agent.org),
-        getHeartbeat(agent.name),
         getAgentRuntime(agent.name, agent.org),
       ]);
+      const hb = hbMap.get(agent.name) ?? null;
 
       let health: HealthStatus = 'down';
       if (hb) {
         health = getHealthStatus(hb);
       }
 
-      // Get tasks for today count and current task
       let currentTask: string | undefined;
       let tasksToday = 0;
       try {
@@ -156,7 +170,6 @@ export async function discoverAgents(org?: string): Promise<AgentSummary[]> {
           (t) => t.completed_at && t.completed_at >= todayISO,
         ).length;
       } catch {
-        // Tasks DB may not be available
         currentTask = hb?.current_task ?? undefined;
       }
 
@@ -167,7 +180,7 @@ export async function discoverAgents(org?: string): Promise<AgentSummary[]> {
         tasksToday: number;
       } = {
         systemName: agent.name,
-        name: identity.name,
+        name: identity.name || agent.name,
         org: agent.org,
         health,
         lastHeartbeat: hb?.last_heartbeat,

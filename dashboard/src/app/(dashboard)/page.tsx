@@ -62,7 +62,7 @@ export default async function OverviewPage({
       discoverAgents(org || undefined),
       getAllHeartbeats(),
     ]),
-    3000,
+    10000,
     emptyFallback(),
   ).catch(() => emptyFallback());
 
