@@ -12,8 +12,4 @@ if (!supabaseUrl || !supabaseKey) {
 // because the cached client holds a stale fetch reference after hot reloads.
 export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false },
-  global: {
-    // Bypass Next.js fetch interceptor — use the native undici fetch directly
-    fetch: (...args: Parameters<typeof fetch>) => fetch(...args),
-  },
 });
