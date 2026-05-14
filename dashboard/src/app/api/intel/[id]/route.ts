@@ -18,6 +18,14 @@ export async function PATCH(
       await updateIntelItem(id, { pinned: false });
     } else if (action === 'dismiss') {
       await updateIntelItem(id, { status: 'dismissed' });
+    } else if (action === 'done') {
+      await updateIntelItem(id, { status: 'done' });
+    } else if (action === 'undismiss' || action === 'undone') {
+      await updateIntelItem(id, { status: 'active' });
+    } else if (action === 'feedback_useful') {
+      await updateIntelItem(id, { feedback: 'useful', feedback_at: new Date().toISOString() });
+    } else if (action === 'feedback_not_useful') {
+      await updateIntelItem(id, { feedback: 'not_useful', feedback_at: new Date().toISOString() });
     } else {
       return Response.json({ error: 'Invalid action' }, { status: 400 });
     }

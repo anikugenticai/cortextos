@@ -60,11 +60,18 @@ CREATE TABLE IF NOT EXISTS sage_intel_items (
   source_ref TEXT,
   status TEXT NOT NULL DEFAULT 'active',
   pinned BOOLEAN NOT NULL DEFAULT false,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  feedback TEXT CHECK (feedback IN ('useful', 'not_useful')),
+  feedback_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT sage_intel_status_check CHECK (status IN ('active', 'dismissed', 'done')),
+  CONSTRAINT sage_intel_category_check CHECK (category IN ('people_radar', 'your_space', 'people_intel', 'dot_connector', 'meeting_prep', 'business_pulse'))
 );
 CREATE INDEX IF NOT EXISTS idx_sage_intel_category ON sage_intel_items(category);
 CREATE INDEX IF NOT EXISTS idx_sage_intel_status ON sage_intel_items(status);
 CREATE INDEX IF NOT EXISTS idx_sage_intel_pinned ON sage_intel_items(pinned);
+CREATE INDEX IF NOT EXISTS idx_sage_intel_pagination ON sage_intel_items(status, pinned DESC, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sage_intel_dedup ON sage_intel_items(source, source_ref) WHERE source_ref IS NOT NULL AND status = 'active';
 `;
 
 const CREATE_SURFACE_TABLE = `

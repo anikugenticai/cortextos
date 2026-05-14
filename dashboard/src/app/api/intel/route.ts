@@ -7,6 +7,8 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const category = searchParams.get('category') as IntelCategory | null;
   const action = searchParams.get('action') ?? 'items';
+  const limit = Math.min(Math.max(parseInt(searchParams.get('limit') ?? '15', 10) || 15, 1), 50);
+  const after = searchParams.get('after') ?? undefined;
 
   try {
     if (action === 'counts') {
@@ -14,8 +16,12 @@ export async function GET(request: NextRequest) {
       return Response.json({ counts });
     }
 
-    const items = await getIntelItems({ category: category ?? undefined });
-    return Response.json({ items });
+    const page = await getIntelItems({
+      category: category ?? undefined,
+      limit,
+      after,
+    });
+    return Response.json(page);
   } catch (err) {
     console.error('[api/intel]', err);
     return Response.json({ error: 'Failed to fetch intel' }, { status: 500 });

@@ -6,6 +6,7 @@ import {
   IconCalendar, IconTrendingUp, IconPin, IconPinnedOff,
   IconX, IconChevronDown, IconChevronRight, IconLoader2,
   IconBrandSlack, IconMail, IconBrandAsana, IconBrain,
+  IconThumbUp, IconThumbDown, IconCheck,
 } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 import type { IntelItem, IntelCategory } from '@/lib/data/intel';
@@ -33,6 +34,25 @@ const SOURCE_ICONS: Record<string, React.ComponentType<{size?: number; className
   calendar: IconCalendar,
   brain:    IconBrain,
 };
+
+function urgencyLabel(urgency: number): { text: string; color: string } | null {
+  if (urgency >= 0.9) return { text: 'NOW', color: '#ef4444' };
+  if (urgency >= 0.7) return { text: 'URGENT', color: '#f59e0b' };
+  if (urgency >= 0.5) return { text: 'THIS WEEK', color: '#3B82F6' };
+  return null;
+}
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}hr ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
 
 // ---------------------------------------------------------------------------
 // Meeting Prep Banner
@@ -105,15 +125,20 @@ function IntelCard({
   onToggle,
   onPin,
   onDismiss,
+  onDone,
+  onFeedback,
 }: {
   item: IntelItem;
   expanded?: boolean;
   onToggle: () => void;
   onPin: (id: string, pinned: boolean) => void;
   onDismiss: (id: string) => void;
+  onDone: (id: string) => void;
+  onFeedback: (id: string, useful: boolean) => void;
 }) {
   const cat = CATEGORY_MAP[item.category] ?? CATEGORY_MAP.all;
   const SourceIcon = item.source ? (SOURCE_ICONS[item.source] ?? IconBrain) : null;
+  const urg = urgencyLabel(item.urgency);
 
   return (
     <div
@@ -152,9 +177,22 @@ function IntelCard({
             }}>
               {cat.label}
             </span>
+            {urg && (
+              <span style={{
+                fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px',
+                padding: '1px 6px', borderRadius: 4,
+                background: `${urg.color}18`, border: `1px solid ${urg.color}44`,
+                color: urg.color, flexShrink: 0,
+              }}>
+                {urg.text}
+              </span>
+            )}
             {item.pinned && (
               <span style={{ fontSize: 9, color: cat.color }}>· Pinned</span>
             )}
+            <span style={{ fontSize: 10, color: '#4a5170', marginLeft: 'auto', flexShrink: 0 }}>
+              {relativeTime(item.created_at)}
+            </span>
           </div>
           <p style={{ fontSize: 13.5, fontWeight: 500, color: '#e8eaf2', margin: 0, lineHeight: 1.4 }}>
             {item.title}
@@ -167,7 +205,36 @@ function IntelCard({
         </div>
 
         {/* Actions + expand */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+          <button
+            onClick={e => { e.stopPropagation(); onFeedback(item.id, true); }}
+            title="Useful"
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer', padding: 4,
+              color: item.feedback === 'useful' ? '#22c55e' : '#4a5170',
+              transition: 'color 0.15s',
+            }}
+          >
+            <IconThumbUp size={13} />
+          </button>
+          <button
+            onClick={e => { e.stopPropagation(); onFeedback(item.id, false); }}
+            title="Not useful"
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer', padding: 4,
+              color: item.feedback === 'not_useful' ? '#ef4444' : '#4a5170',
+              transition: 'color 0.15s',
+            }}
+          >
+            <IconThumbDown size={13} />
+          </button>
+          <button
+            onClick={e => { e.stopPropagation(); onDone(item.id); }}
+            title="Mark done"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, color: '#4a5170', transition: 'color 0.15s' }}
+          >
+            <IconCheck size={14} />
+          </button>
           <button
             onClick={e => { e.stopPropagation(); onPin(item.id, !item.pinned); }}
             title={item.pinned ? 'Unpin' : 'Pin'}
@@ -237,7 +304,7 @@ function IntelCard({
               </span>
             )}
             <span style={{ fontSize: 10, color: '#4a5170', fontFamily: 'var(--font-jetbrains, monospace)', marginLeft: 'auto' }}>
-              {new Date(item.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+              {relativeTime(item.created_at)}
             </span>
           </div>
         </div>
@@ -253,21 +320,41 @@ function IntelCard({
 export function IntelFeed() {
   const [items, setItems] = useState<IntelItem[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<IntelCategory | 'all'>('all');
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const fetchItems = useCallback(async (cat: IntelCategory | 'all') => {
     setLoading(true);
-    const url = cat === 'all' ? '/api/intel' : `/api/intel?category=${cat}`;
+    const params = new URLSearchParams({ limit: '15' });
+    if (cat !== 'all') params.set('category', cat);
     const [itemsRes, countsRes] = await Promise.all([
-      fetch(url).then(r => r.json()).catch(() => ({ items: [] })),
+      fetch(`/api/intel?${params}`).then(r => r.json()).catch(() => ({ items: [], total: 0, hasMore: false, nextCursor: null })),
       fetch('/api/intel?action=counts').then(r => r.json()).catch(() => ({ counts: {} })),
     ]);
     setItems(itemsRes.items ?? []);
+    setTotal(itemsRes.total ?? 0);
+    setHasMore(itemsRes.hasMore ?? false);
+    setNextCursor(itemsRes.nextCursor ?? null);
     setCounts(countsRes.counts ?? {});
     setLoading(false);
   }, []);
+
+  const loadMore = useCallback(async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    const params = new URLSearchParams({ limit: '10', after: nextCursor });
+    if (selectedCategory !== 'all') params.set('category', selectedCategory);
+    const res = await fetch(`/api/intel?${params}`).then(r => r.json()).catch(() => ({ items: [], hasMore: false, nextCursor: null }));
+    setItems(prev => [...prev, ...(res.items ?? [])]);
+    setHasMore(res.hasMore ?? false);
+    setNextCursor(res.nextCursor ?? null);
+    setLoadingMore(false);
+  }, [nextCursor, loadingMore, selectedCategory]);
 
   useEffect(() => { fetchItems(selectedCategory); }, [selectedCategory, fetchItems]);
 
@@ -280,6 +367,17 @@ export function IntelFeed() {
     });
   };
 
+  const patchItem = async (id: string, action: string) => {
+    const res = await fetch(`/api/intel/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    });
+    if (!res.ok) {
+      fetchItems(selectedCategory);
+    }
+  };
+
   const handlePin = async (id: string, pinned: boolean) => {
     setItems(prev => prev.map(i => i.id === id ? { ...i, pinned } : i)
       .sort((a, b) => {
@@ -287,21 +385,27 @@ export function IntelFeed() {
         if (!a.pinned && b.pinned) return 1;
         return b.score - a.score;
       }));
-    await fetch(`/api/intel/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: pinned ? 'pin' : 'unpin' }),
-    });
+    await patchItem(id, pinned ? 'pin' : 'unpin');
   };
 
   const handleDismiss = async (id: string) => {
     setItems(prev => prev.filter(i => i.id !== id));
+    setTotal(prev => Math.max(0, prev - 1));
     setCounts(prev => ({ ...prev, all: Math.max(0, (prev.all ?? 0) - 1) }));
-    await fetch(`/api/intel/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'dismiss' }),
-    });
+    await patchItem(id, 'dismiss');
+  };
+
+  const handleDone = async (id: string) => {
+    setItems(prev => prev.filter(i => i.id !== id));
+    setTotal(prev => Math.max(0, prev - 1));
+    setCounts(prev => ({ ...prev, all: Math.max(0, (prev.all ?? 0) - 1) }));
+    await patchItem(id, 'done');
+  };
+
+  const handleFeedback = async (id: string, useful: boolean) => {
+    const feedback = useful ? 'useful' as const : 'not_useful' as const;
+    setItems(prev => prev.map(i => i.id === id ? { ...i, feedback, feedback_at: new Date().toISOString() } : i));
+    await patchItem(id, useful ? 'feedback_useful' : 'feedback_not_useful');
   };
 
   const meetingPrepItems = items.filter(i => i.category === 'meeting_prep' && i.urgency >= 0.8);
@@ -378,8 +482,31 @@ export function IntelFeed() {
           onToggle={() => toggleExpand(item.id)}
           onPin={handlePin}
           onDismiss={handleDismiss}
+          onDone={handleDone}
+          onFeedback={handleFeedback}
         />
       ))}
+
+      {/* Show more button */}
+      {!loading && hasMore && (
+        <button
+          onClick={loadMore}
+          disabled={loadingMore}
+          style={{
+            width: '100%', padding: '12px', borderRadius: 10,
+            background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+            color: '#6b7494', fontSize: 12, fontWeight: 500, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            transition: 'all 0.15s',
+          }}
+        >
+          {loadingMore ? (
+            <IconLoader2 size={14} className="animate-spin" />
+          ) : (
+            <>Show 10 more ({Math.max(0, total - items.length)} remaining)</>
+          )}
+        </button>
+      )}
     </div>
   );
 }
