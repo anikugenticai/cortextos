@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { updateIntelItem } from '@/lib/data/intel';
+import { updateIntelSignal } from '@/lib/data/intel-signals';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,20 +12,14 @@ export async function PATCH(
   const { action } = body as { action?: string };
 
   try {
-    if (action === 'pin') {
-      await updateIntelItem(id, { pinned: true });
-    } else if (action === 'unpin') {
-      await updateIntelItem(id, { pinned: false });
-    } else if (action === 'dismiss') {
-      await updateIntelItem(id, { status: 'dismissed' });
+    if (action === 'dismiss') {
+      await updateIntelSignal(id, { status: 'dismissed' });
     } else if (action === 'done') {
-      await updateIntelItem(id, { status: 'done' });
-    } else if (action === 'undismiss' || action === 'undone') {
-      await updateIntelItem(id, { status: 'active' });
+      await updateIntelSignal(id, { status: 'done' });
     } else if (action === 'feedback_useful') {
-      await updateIntelItem(id, { feedback: 'useful', feedback_at: new Date().toISOString() });
+      await updateIntelSignal(id, { feedback: 'useful' });
     } else if (action === 'feedback_not_useful') {
-      await updateIntelItem(id, { feedback: 'not_useful', feedback_at: new Date().toISOString() });
+      await updateIntelSignal(id, { feedback: 'not_useful' });
     } else {
       return Response.json({ error: 'Invalid action' }, { status: 400 });
     }
